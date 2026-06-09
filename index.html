@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>無人機硬式天線極化錯位損耗計算器 - 3D 互動升級版</title>
+  <link rel="stylesheet" href="styles.css?v=20260609-link-budget1">
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+</head>
+<body>
+  <main class="dashboard">
+    <header class="dashboard-header">
+      <div>
+        <p class="eyebrow">UAV RF Polarization Analyzer</p>
+        <h1>無人機硬式天線極化錯位損耗計算器</h1>
+      </div>
+      <div class="status-pill">
+        <span class="status-dot"></span>
+        3D 即時模擬
+      </div>
+    </header>
+
+    <section class="instrument-layout">
+      <article class="panel scene-panel" aria-labelledby="scene-title">
+        <div class="section-heading">
+          <h2 id="scene-title">3D 互動視覺化區</h2>
+          <span>滑鼠拖曳只旋轉無人機，地面站天線固定</span>
+        </div>
+        <div id="threeScene" class="scene-host"></div>
+        <section class="debug-log" aria-labelledby="debug-log-title">
+          <div class="debug-log-header">
+            <h3 id="debug-log-title">啟動診斷 Log</h3>
+            <span id="debugStatus">等待啟動</span>
+          </div>
+          <ol id="debugLog" aria-live="polite"></ol>
+        </section>
+      </article>
+
+      <aside class="right-panel">
+        <section class="panel control-panel" aria-labelledby="control-title">
+          <div class="section-heading">
+            <h2 id="control-title">控制區</h2>
+            <span id="sliderValue" class="angle-chip">0°</span>
+          </div>
+          <label for="pitchSlider">無人機俯仰角 (Pitch Angle)</label>
+          <div class="slider-row">
+            <span>0°</span>
+            <input id="pitchSlider" type="range" min="0" max="90" value="0" step="1">
+            <span>90°</span>
+          </div>
+          <div class="input-grid">
+            <label for="distanceInput">
+              <span>無人機與地面站距離</span>
+              <div class="number-field">
+                <input id="distanceInput" type="number" min="0.001" step="0.1" value="1">
+                <span>公里</span>
+              </div>
+            </label>
+            <label for="frequencyInput">
+              <span>訊號頻率</span>
+              <div class="number-field">
+                <input id="frequencyInput" type="number" min="0.001" step="1" value="433">
+                <span>MHz</span>
+              </div>
+            </label>
+            <label for="txPowerInput">
+              <span>地面站 Tx Power</span>
+              <div class="number-field">
+                <input id="txPowerInput" type="number" step="1" value="30">
+                <span>dBm</span>
+              </div>
+            </label>
+            <label for="txGainInput">
+              <span>地面站天線 Peak gain</span>
+              <div class="number-field">
+                <input id="txGainInput" type="number" step="0.1" value="2.15">
+                <span>dBi</span>
+              </div>
+            </label>
+            <label for="rxGainInput">
+              <span>無人機天線 Peak gain</span>
+              <div class="number-field">
+                <input id="rxGainInput" type="number" step="0.1" value="2.15">
+                <span>dBi</span>
+              </div>
+            </label>
+            <label for="noiseFigureInput">
+              <span>無人機內部 NF</span>
+              <div class="number-field">
+                <input id="noiseFigureInput" type="number" min="0" step="0.1" value="6">
+                <span>dB</span>
+              </div>
+            </label>
+            <label for="sensitivityInput">
+              <span>最低接收 Sensitivity Spec</span>
+              <div class="number-field">
+                <input id="sensitivityInput" type="number" step="1" value="-120">
+                <span>dBm</span>
+              </div>
+            </label>
+            <label for="bandwidthInput">
+              <span>接收訊號頻寬</span>
+              <div class="number-field">
+                <input id="bandwidthInput" type="number" min="0.001" step="1" value="125">
+                <span>kHz</span>
+              </div>
+            </label>
+            <label for="snrInput">
+              <span>接收端 SNR</span>
+              <div class="number-field">
+                <input id="snrInput" type="number" step="0.1" value="10">
+                <span>dB</span>
+              </div>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel metrics-panel" aria-labelledby="metrics-title">
+          <div class="section-heading">
+            <h2 id="metrics-title">即時數據面板</h2>
+          </div>
+          <div class="metric">
+            <span>當前無人機俯仰角</span>
+            <strong id="currentPitch">0 度</strong>
+          </div>
+          <div class="metric">
+            <span>計算出的夾角 θ (3D)</span>
+            <strong id="currentTheta">0 度</strong>
+          </div>
+          <div class="metric">
+            <span>極化錯位損耗</span>
+            <strong id="currentLoss">0.00 dB</strong>
+          </div>
+          <div class="metric">
+            <span>自由空間路徑損耗 (FSPL)</span>
+            <strong id="currentFspl">0.00 dB</strong>
+          </div>
+          <div class="metric">
+            <span>總訊號衰減</span>
+            <strong id="currentTotalLoss">0.00 dB</strong>
+          </div>
+          <div class="metric">
+            <span>最終 Rx Level</span>
+            <strong id="currentRxLevel">0.00 dBm</strong>
+          </div>
+          <div class="metric">
+            <span>Noise Floor + SNR 門檻</span>
+            <strong id="currentRequiredSignal">0.00 dBm</strong>
+          </div>
+          <div class="metric">
+            <span>Link Margin</span>
+            <strong id="currentLinkMargin">0.00 dB</strong>
+          </div>
+          <div class="metric link-state" id="linkStateCard">
+            <span>鏈路狀態</span>
+            <strong id="currentLinkState">無人機可控</strong>
+          </div>
+        </section>
+
+        <section class="panel chart-panel" aria-labelledby="chart-title">
+          <div class="section-heading">
+            <h2 id="chart-title">數據圖表區</h2>
+            <span>Lpol = 20 × log10(cos θ)</span>
+          </div>
+          <div id="lossCurveChart" class="chart-host"></div>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <script defer src="script.js?v=20260609-link-budget1"></script>
+</body>
+</html>
