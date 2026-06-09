@@ -7,8 +7,8 @@ const txPowerInput = document.querySelector("#txPowerInput");
 const txGainInput = document.querySelector("#txGainInput");
 const rxGainInput = document.querySelector("#rxGainInput");
 const noiseFigureInput = document.querySelector("#noiseFigureInput");
-const sensitivityInput = document.querySelector("#sensitivityInput");
 const bandwidthInput = document.querySelector("#bandwidthInput");
+const bandwidthUnitInput = document.querySelector("#bandwidthUnitInput");
 const snrInput = document.querySelector("#snrInput");
 const currentPitch = document.querySelector("#currentPitch");
 const currentTheta = document.querySelector("#currentTheta");
@@ -92,8 +92,12 @@ function calculateFspl(distanceKm, frequencyMHz) {
   return 32.44 + 20 * Math.log10(distanceKm) + 20 * Math.log10(frequencyMHz);
 }
 
-function calculateNoiseFloor(bandwidthKHz, noiseFigureDb) {
-  const bandwidthHz = bandwidthKHz * 1000;
+function bandwidthToHz(bandwidth, unit) {
+  return unit === "MHz" ? bandwidth * 1000000 : bandwidth * 1000;
+}
+
+function calculateNoiseFloor(bandwidth, unit, noiseFigureDb) {
+  const bandwidthHz = bandwidthToHz(bandwidth, unit);
   return -174 + 10 * Math.log10(bandwidthHz) + noiseFigureDb;
 }
 
@@ -618,17 +622,16 @@ function updateDashboard(thetaFromScene) {
   const txGainDbi = numberFromInput(txGainInput, 0);
   const rxGainDbi = numberFromInput(rxGainInput, 0);
   const noiseFigureDb = nonNegativeNumberFromInput(noiseFigureInput, 6);
-  const sensitivitySpecDbm = numberFromInput(sensitivityInput, -120);
-  const bandwidthKHz = positiveNumberFromInput(bandwidthInput, 125);
+  const bandwidth = positiveNumberFromInput(bandwidthInput, 125);
+  const bandwidthUnit = bandwidthUnitInput?.value === "MHz" ? "MHz" : "kHz";
   const snrDb = numberFromInput(snrInput, 0);
   const fspl = calculateFspl(distanceKm, frequencyMHz);
   const totalAttenuation = fspl + Math.abs(polarizationLoss);
   const rxLevelDbm = txPowerDbm + txGainDbi + rxGainDbi - fspl + polarizationLoss;
-  const noiseFloorDbm = calculateNoiseFloor(bandwidthKHz, noiseFigureDb);
+  const noiseFloorDbm = calculateNoiseFloor(bandwidth, bandwidthUnit, noiseFigureDb);
   const requiredBySnrDbm = noiseFloorDbm + snrDb;
-  const effectiveThresholdDbm = Math.max(sensitivitySpecDbm, requiredBySnrDbm);
-  const linkMarginDb = rxLevelDbm - effectiveThresholdDbm;
-  const isControllable = linkMarginDb >= 0;
+  const linkMarginDb = rxLevelDbm - requiredBySnrDbm;
+  const isControllable = rxLevelDbm > requiredBySnrDbm;
 
   sliderValue.textContent = `${pitchDegrees}°`;
   currentPitch.textContent = `${pitchDegrees} 度`;
@@ -637,7 +640,7 @@ function updateDashboard(thetaFromScene) {
   currentFspl.textContent = `${fspl.toFixed(2)} dB`;
   currentTotalLoss.textContent = `-${totalAttenuation.toFixed(2)} dB`;
   currentRxLevel.textContent = `${rxLevelDbm.toFixed(2)} dBm`;
-  currentRequiredSignal.textContent = `${effectiveThresholdDbm.toFixed(2)} dBm`;
+  currentRequiredSignal.textContent = `${requiredBySnrDbm.toFixed(2)} dBm`;
   currentLinkMargin.textContent = `${linkMarginDb.toFixed(2)} dB`;
   currentLinkState.textContent = isControllable ? "無人機可控" : "無人機失控";
   linkStateCard.classList.toggle("controlled", isControllable);
@@ -655,8 +658,8 @@ function updateDashboard(thetaFromScene) {
     txGainDbi,
     rxGainDbi,
     noiseFigureDb,
-    sensitivitySpecDbm,
-    bandwidthKHz,
+    bandwidth,
+    bandwidthUnit,
     snrDb,
     isControllable
   ].join("|");
@@ -665,7 +668,7 @@ function updateDashboard(thetaFromScene) {
     reportLog(
       "鏈路預算已更新",
       isControllable ? "ok" : "warn",
-      `Rx=${rxLevelDbm.toFixed(2)} dBm, threshold=${effectiveThresholdDbm.toFixed(2)} dBm, margin=${linkMarginDb.toFixed(2)} dB, state=${currentLinkState.textContent}`
+      `Rx=${rxLevelDbm.toFixed(2)} dBm, threshold=${requiredBySnrDbm.toFixed(2)} dBm, margin=${linkMarginDb.toFixed(2)} dB, state=${currentLinkState.textContent}`
     );
     lastLoggedSignature = signature;
   }
@@ -695,10 +698,13 @@ async function boot() {
       txGainInput,
       rxGainInput,
       noiseFigureInput,
-      sensitivityInput,
       bandwidthInput,
+      bandwidthUnitInput,
       snrInput
-    ].forEach((input) => input.addEventListener("input", () => updateDashboard()));
+    ].forEach((input) => {
+      input.addEventListener("input", () => updateDashboard());
+      input.addEventListener("change", () => updateDashboard());
+    });
     updateDashboard();
     reportLog("儀表板啟動完成");
   } catch (error) {

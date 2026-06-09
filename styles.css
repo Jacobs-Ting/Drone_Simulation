@@ -112,7 +112,7 @@ h2 {
 
 .right-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(310px, 1fr);
+  grid-template-rows: auto minmax(310px, 1fr);
   gap: 18px;
 }
 
@@ -235,7 +235,8 @@ h2 {
   background: rgba(5, 14, 18, 0.62);
 }
 
-.number-field input {
+.number-field input,
+.number-field select {
   width: 100%;
   border: 0;
   outline: 0;
@@ -243,6 +244,13 @@ h2 {
   color: var(--text);
   font: inherit;
   font-weight: 700;
+}
+
+.number-field select {
+  width: auto;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
 }
 
 .number-field input::-webkit-outer-spin-button,
@@ -329,6 +337,31 @@ input[type="range"] {
   border: 1px solid rgba(98, 153, 169, 0.2);
   border-radius: 6px;
   background: rgba(5, 14, 18, 0.72);
+}
+
+.scene-panel .metrics-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0 14px;
+  margin-top: 18px;
+}
+
+.metrics-panel .section-heading {
+  grid-column: 1 / -1;
+}
+
+.metrics-panel .metric {
+  min-width: 0;
+  min-height: 118px;
+}
+
+.metrics-panel .metric strong {
+  font-size: clamp(1.35rem, 2vw, 1.95rem);
+  overflow-wrap: anywhere;
+}
+
+.metrics-panel .link-state {
+  grid-column: span 2;
 }
 
 .debug-log-header {

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>無人機硬式天線極化錯位損耗計算器 - 3D 互動升級版</title>
-  <link rel="stylesheet" href="styles.css?v=20260609-link-budget1">
+  <link rel="stylesheet" href="styles.css?v=20260609-metrics-horizontal1">
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 </head>
@@ -34,6 +34,48 @@
             <span id="debugStatus">等待啟動</span>
           </div>
           <ol id="debugLog" aria-live="polite"></ol>
+        </section>
+
+        <section class="panel metrics-panel" aria-labelledby="metrics-title">
+          <div class="section-heading">
+            <h2 id="metrics-title">即時數據面板</h2>
+          </div>
+          <div class="metric">
+            <span>當前無人機俯仰角</span>
+            <strong id="currentPitch">0 度</strong>
+          </div>
+          <div class="metric">
+            <span>計算出的夾角 θ (3D)</span>
+            <strong id="currentTheta">0 度</strong>
+          </div>
+          <div class="metric">
+            <span>極化錯位損耗</span>
+            <strong id="currentLoss">0.00 dB</strong>
+          </div>
+          <div class="metric">
+            <span>自由空間路徑損耗 (FSPL)</span>
+            <strong id="currentFspl">0.00 dB</strong>
+          </div>
+          <div class="metric">
+            <span>總訊號衰減</span>
+            <strong id="currentTotalLoss">0.00 dB</strong>
+          </div>
+          <div class="metric">
+            <span>最終 Rx Level</span>
+            <strong id="currentRxLevel">0.00 dBm</strong>
+          </div>
+          <div class="metric">
+            <span>Noise Floor + SNR 門檻</span>
+            <strong id="currentRequiredSignal">0.00 dBm</strong>
+          </div>
+          <div class="metric">
+            <span>Link Margin</span>
+            <strong id="currentLinkMargin">0.00 dB</strong>
+          </div>
+          <div class="metric link-state" id="linkStateCard">
+            <span>鏈路狀態</span>
+            <strong id="currentLinkState">無人機可控</strong>
+          </div>
         </section>
       </article>
 
@@ -92,18 +134,14 @@
                 <span>dB</span>
               </div>
             </label>
-            <label for="sensitivityInput">
-              <span>最低接收 Sensitivity Spec</span>
-              <div class="number-field">
-                <input id="sensitivityInput" type="number" step="1" value="-120">
-                <span>dBm</span>
-              </div>
-            </label>
             <label for="bandwidthInput">
               <span>接收訊號頻寬</span>
               <div class="number-field">
                 <input id="bandwidthInput" type="number" min="0.001" step="1" value="125">
-                <span>kHz</span>
+                <select id="bandwidthUnitInput" aria-label="接收訊號頻寬單位">
+                  <option value="kHz" selected>kHz</option>
+                  <option value="MHz">MHz</option>
+                </select>
               </div>
             </label>
             <label for="snrInput">
@@ -113,48 +151,6 @@
                 <span>dB</span>
               </div>
             </label>
-          </div>
-        </section>
-
-        <section class="panel metrics-panel" aria-labelledby="metrics-title">
-          <div class="section-heading">
-            <h2 id="metrics-title">即時數據面板</h2>
-          </div>
-          <div class="metric">
-            <span>當前無人機俯仰角</span>
-            <strong id="currentPitch">0 度</strong>
-          </div>
-          <div class="metric">
-            <span>計算出的夾角 θ (3D)</span>
-            <strong id="currentTheta">0 度</strong>
-          </div>
-          <div class="metric">
-            <span>極化錯位損耗</span>
-            <strong id="currentLoss">0.00 dB</strong>
-          </div>
-          <div class="metric">
-            <span>自由空間路徑損耗 (FSPL)</span>
-            <strong id="currentFspl">0.00 dB</strong>
-          </div>
-          <div class="metric">
-            <span>總訊號衰減</span>
-            <strong id="currentTotalLoss">0.00 dB</strong>
-          </div>
-          <div class="metric">
-            <span>最終 Rx Level</span>
-            <strong id="currentRxLevel">0.00 dBm</strong>
-          </div>
-          <div class="metric">
-            <span>Noise Floor + SNR 門檻</span>
-            <strong id="currentRequiredSignal">0.00 dBm</strong>
-          </div>
-          <div class="metric">
-            <span>Link Margin</span>
-            <strong id="currentLinkMargin">0.00 dB</strong>
-          </div>
-          <div class="metric link-state" id="linkStateCard">
-            <span>鏈路狀態</span>
-            <strong id="currentLinkState">無人機可控</strong>
           </div>
         </section>
 
@@ -169,6 +165,6 @@
     </section>
   </main>
 
-  <script defer src="script.js?v=20260609-link-budget1"></script>
+  <script defer src="script.js?v=20260609-threshold1"></script>
 </body>
 </html>
