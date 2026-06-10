@@ -201,8 +201,102 @@ h2 {
   font-weight: 650;
 }
 
+.control-panel {
+  max-height: calc(100vh - 72px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(98, 153, 169, 0.55) rgba(5, 14, 18, 0.55);
+}
+
+.control-card {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid #2c353d;
+  border-radius: 8px;
+  background: #1e252b;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.control-card:last-child {
+  margin-bottom: 0;
+}
+
+.control-card h3 {
+  margin: 0 0 14px;
+  color: var(--cyan);
+  font-size: 14px;
+  font-weight: 780;
+  letter-spacing: 0.04em;
+}
+
+.control-card h4 {
+  margin: 0 0 10px;
+  color: var(--green);
+  font-size: 0.78rem;
+  font-weight: 760;
+  letter-spacing: 0.03em;
+}
+
+.control-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.control-grid.two-column {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.control-grid label,
+.slider-field {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.hardware-section {
+  padding-top: 14px;
+  border-top: 1px solid rgba(138, 166, 176, 0.14);
+}
+
+.hardware-section:first-of-type {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.hardware-section + .hardware-section {
+  margin-top: 16px;
+}
+
+.card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.card-title-row h3 {
+  margin: 0;
+}
+
+.jammer-range-note {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(138, 166, 176, 0.14);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.jammer-range-note output {
+  color: var(--red);
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+}
+
 .target-switch {
-  margin: 0 0 18px;
+  margin: 0 0 16px;
   padding: 0;
   border: 0;
 }
@@ -296,6 +390,11 @@ h2 {
   font-weight: 700;
 }
 
+.number-field input[type="number"] {
+  min-height: 40px;
+  text-align: right;
+}
+
 .number-field select {
   width: auto;
   color: var(--muted);
@@ -305,6 +404,80 @@ h2 {
 
 .number-field select:only-child {
   width: 100%;
+}
+
+.toggle-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid rgba(98, 153, 169, 0.28);
+  border-radius: 6px;
+  background: rgba(5, 14, 18, 0.62);
+}
+
+.toggle-field.compact-toggle {
+  grid-template-columns: auto auto;
+  gap: 10px;
+  min-height: 34px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.toggle-field > span {
+  color: var(--muted);
+}
+
+.toggle-row {
+  position: relative;
+  width: 50px;
+  height: 28px;
+}
+
+.toggle-row input {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(98, 153, 169, 0.35);
+  border-radius: 999px;
+  background: rgba(8, 18, 23, 0.9);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.toggle-track::after {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--muted);
+  content: "";
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.toggle-row input:checked + .toggle-track {
+  border-color: rgba(255, 96, 120, 0.62);
+  background: rgba(255, 96, 120, 0.16);
+}
+
+.toggle-row input:checked + .toggle-track::after {
+  transform: translateX(21px);
+  background: var(--red);
+  box-shadow: 0 0 14px rgba(255, 96, 120, 0.72);
 }
 
 .chart-mode-switch {
@@ -579,6 +752,15 @@ svg {
 
   .chart-mode-switch {
     width: 100%;
+  }
+
+  .control-grid.two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .card-title-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .target-options {

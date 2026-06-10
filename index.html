@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>無人機硬式天線極化錯位損耗計算器 - 3D 互動升級版</title>
-  <link rel="stylesheet" href="styles.css?v=20260610-two-ray1">
+  <link rel="stylesheet" href="styles.css?v=20260610-jammer-uav-distance1">
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 </head>
@@ -65,7 +65,7 @@
             <strong id="currentRxLevel">0.00 dBm</strong>
           </div>
           <div class="metric">
-            <span>Noise Floor + SNR 門檻</span>
+            <span>總底噪 + SNR 門檻</span>
             <strong id="currentRequiredSignal">0.00 dBm</strong>
           </div>
           <div class="metric">
@@ -85,108 +85,163 @@
             <h2 id="control-title">控制區</h2>
             <span id="sliderValue" class="angle-chip">0°</span>
           </div>
-          <fieldset class="target-switch" aria-labelledby="target-antenna-title">
-            <legend id="target-antenna-title">選擇分析天線 (Target Antenna)</legend>
-            <div class="target-options">
-              <label>
-                <input type="radio" name="targetAntenna" value="tail" checked>
-                <span>機尾 433MHz 天線</span>
+
+          <div class="control-card">
+            <h3>全局與姿態控制</h3>
+            <fieldset class="target-switch" aria-labelledby="target-antenna-title">
+              <legend id="target-antenna-title">選擇分析天線 (Target Antenna)</legend>
+              <div class="target-options">
+                <label>
+                  <input type="radio" name="targetAntenna" value="tail" checked>
+                  <span>機尾 433MHz 天線</span>
+                </label>
+                <label>
+                  <input type="radio" name="targetAntenna" value="leg">
+                  <span>腳架 2.4/5GHz 天線</span>
+                </label>
+              </div>
+            </fieldset>
+            <label for="pitchSlider" class="slider-field">無人機俯仰角 (Pitch Angle)</label>
+            <div class="slider-row">
+              <span>0°</span>
+              <input id="pitchSlider" type="range" min="0" max="90" value="0" step="1">
+              <span>90°</span>
+            </div>
+          </div>
+
+          <div class="control-card">
+            <h3>空間幾何與環境</h3>
+            <div class="control-grid two-column">
+              <label for="distanceInput">
+                <span>無人機與地面站距離</span>
+                <div class="number-field">
+                  <input id="distanceInput" type="number" min="0.001" step="0.1" value="1">
+                  <span>公里</span>
+                </div>
               </label>
-              <label>
-                <input type="radio" name="targetAntenna" value="leg">
-                <span>腳架 2.4/5GHz 天線</span>
+              <label for="multipathModelInput">
+                <span>多重路徑環境 (Multipath Model)</span>
+                <div class="number-field">
+                  <select id="multipathModelInput">
+                    <option value="fspl" selected>純自由空間 (FSPL Only)</option>
+                    <option value="tworay">雙射線地表反射 (Two-Ray Ground Reflection)</option>
+                  </select>
+                </div>
+              </label>
+              <label for="uavHeightInput">
+                <span>無人機高度 (UAV Height)</span>
+                <div class="number-field">
+                  <input id="uavHeightInput" type="number" min="1" max="500" step="1" value="50">
+                  <span>公尺</span>
+                </div>
+              </label>
+              <label for="gsHeightInput">
+                <span>地面站高度 (GS Height)</span>
+                <div class="number-field">
+                  <input id="gsHeightInput" type="number" min="0.5" max="20" step="0.1" value="1.5">
+                  <span>公尺</span>
+                </div>
               </label>
             </div>
-          </fieldset>
-          <label for="pitchSlider">無人機俯仰角 (Pitch Angle)</label>
-          <div class="slider-row">
-            <span>0°</span>
-            <input id="pitchSlider" type="range" min="0" max="90" value="0" step="1">
-            <span>90°</span>
           </div>
-          <div class="input-grid">
-            <label for="distanceInput">
-              <span>無人機與地面站距離</span>
-              <div class="number-field">
-                <input id="distanceInput" type="number" min="0.001" step="0.1" value="1">
-                <span>公里</span>
+
+          <div class="control-card">
+            <h3>收發機硬體配置</h3>
+            <div class="hardware-section">
+              <h4>地面站 Tx</h4>
+              <div class="control-grid two-column">
+                <label for="frequencyInput">
+                  <span>訊號頻率</span>
+                  <div class="number-field">
+                    <input id="frequencyInput" type="number" min="0.001" step="1" value="433">
+                    <span>MHz</span>
+                  </div>
+                </label>
+                <label for="txPowerInput">
+                  <span>地面站 Tx Power</span>
+                  <div class="number-field">
+                    <input id="txPowerInput" type="number" step="1" value="30">
+                    <span>dBm</span>
+                  </div>
+                </label>
+                <label for="txGainInput">
+                  <span>地面站天線 Peak gain</span>
+                  <div class="number-field">
+                    <input id="txGainInput" type="number" step="0.1" value="2.15">
+                    <span>dBi</span>
+                  </div>
+                </label>
               </div>
-            </label>
-            <label for="uavHeightInput">
-              <span>無人機高度 (UAV Height)</span>
-              <div class="number-field">
-                <input id="uavHeightInput" type="number" min="1" max="500" step="1" value="50">
-                <span>公尺</span>
+            </div>
+
+            <div class="hardware-section">
+              <h4>無人機 Rx</h4>
+              <div class="control-grid two-column">
+                <label for="rxGainInput">
+                  <span>無人機天線 Peak gain</span>
+                  <div class="number-field">
+                    <input id="rxGainInput" type="number" step="0.1" value="2.15">
+                    <span>dBi</span>
+                  </div>
+                </label>
+                <label for="noiseFigureInput">
+                  <span>無人機內部 NF</span>
+                  <div class="number-field">
+                    <input id="noiseFigureInput" type="number" min="0" step="0.1" value="6">
+                    <span>dB</span>
+                  </div>
+                </label>
+                <label for="bandwidthInput">
+                  <span>接收訊號頻寬</span>
+                  <div class="number-field">
+                    <input id="bandwidthInput" type="number" min="0.001" step="1" value="125">
+                    <select id="bandwidthUnitInput" aria-label="接收訊號頻寬單位">
+                      <option value="kHz" selected>kHz</option>
+                      <option value="MHz">MHz</option>
+                    </select>
+                  </div>
+                </label>
+                <label for="snrInput">
+                  <span>接收端 SNR 門檻</span>
+                  <div class="number-field">
+                    <input id="snrInput" type="number" step="0.1" value="10">
+                    <span>dB</span>
+                  </div>
+                </label>
               </div>
-            </label>
-            <label for="gsHeightInput">
-              <span>地面站高度 (GS Height)</span>
-              <div class="number-field">
-                <input id="gsHeightInput" type="number" min="0.5" max="20" step="0.1" value="1.5">
-                <span>公尺</span>
-              </div>
-            </label>
-            <label for="multipathModelInput">
-              <span>多重路徑環境 (Multipath Model)</span>
-              <div class="number-field">
-                <select id="multipathModelInput">
-                  <option value="fspl" selected>純自由空間 (FSPL Only)</option>
-                  <option value="tworay">雙射線地表反射 (Two-Ray Ground Reflection)</option>
-                </select>
-              </div>
-            </label>
-            <label for="frequencyInput">
-              <span>訊號頻率</span>
-              <div class="number-field">
-                <input id="frequencyInput" type="number" min="0.001" step="1" value="433">
-                <span>MHz</span>
-              </div>
-            </label>
-            <label for="txPowerInput">
-              <span>地面站 Tx Power</span>
-              <div class="number-field">
-                <input id="txPowerInput" type="number" step="1" value="30">
-                <span>dBm</span>
-              </div>
-            </label>
-            <label for="txGainInput">
-              <span>地面站天線 Peak gain</span>
-              <div class="number-field">
-                <input id="txGainInput" type="number" step="0.1" value="2.15">
-                <span>dBi</span>
-              </div>
-            </label>
-            <label for="rxGainInput">
-              <span>無人機天線 Peak gain</span>
-              <div class="number-field">
-                <input id="rxGainInput" type="number" step="0.1" value="2.15">
-                <span>dBi</span>
-              </div>
-            </label>
-            <label for="noiseFigureInput">
-              <span>無人機內部 NF</span>
-              <div class="number-field">
-                <input id="noiseFigureInput" type="number" min="0" step="0.1" value="6">
-                <span>dB</span>
-              </div>
-            </label>
-            <label for="bandwidthInput">
-              <span>接收訊號頻寬</span>
-              <div class="number-field">
-                <input id="bandwidthInput" type="number" min="0.001" step="1" value="125">
-                <select id="bandwidthUnitInput" aria-label="接收訊號頻寬單位">
-                  <option value="kHz" selected>kHz</option>
-                  <option value="MHz">MHz</option>
-                </select>
-              </div>
-            </label>
-            <label for="snrInput">
-              <span>接收端 SNR</span>
-              <div class="number-field">
-                <input id="snrInput" type="number" step="0.1" value="10">
-                <span>dB</span>
-              </div>
-            </label>
+            </div>
+          </div>
+
+          <div class="control-card">
+            <div class="card-title-row">
+              <h3>主動干擾源</h3>
+              <label class="toggle-field compact-toggle" for="interfererEnabledInput">
+                <span>開啟</span>
+                <div class="toggle-row">
+                  <input id="interfererEnabledInput" type="checkbox">
+                  <span class="toggle-track" aria-hidden="true"></span>
+                </div>
+              </label>
+            </div>
+            <div class="control-grid two-column">
+              <label for="interfererDistanceInput">
+                <span>干擾源距離（離無人機）</span>
+                <div class="number-field">
+                  <input id="interfererDistanceInput" type="number" min="1" step="10" value="2000">
+                  <span>公尺</span>
+                </div>
+              </label>
+              <label for="interfererPowerInput">
+                <span>干擾源 Tx Power</span>
+                <div class="number-field">
+                  <input id="interfererPowerInput" type="number" step="1" value="30">
+                  <span>dBm</span>
+                </div>
+              </label>
+            </div>
+            <p class="jammer-range-note">
+              干擾計算距離：<output id="interfererUavDistanceOutput">--</output>
+            </p>
           </div>
         </section>
 
@@ -207,6 +262,6 @@
     </section>
   </main>
 
-  <script defer src="script.js?v=20260610-two-ray2"></script>
+  <script defer src="script.js?v=20260610-jammer-uav-distance1"></script>
 </body>
 </html>

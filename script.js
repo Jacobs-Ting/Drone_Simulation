@@ -6,6 +6,10 @@ const distanceInput = document.querySelector("#distanceInput");
 const uavHeightInput = document.querySelector("#uavHeightInput");
 const gsHeightInput = document.querySelector("#gsHeightInput");
 const multipathModelInput = document.querySelector("#multipathModelInput");
+const interfererEnabledInput = document.querySelector("#interfererEnabledInput");
+const interfererDistanceInput = document.querySelector("#interfererDistanceInput");
+const interfererPowerInput = document.querySelector("#interfererPowerInput");
+const interfererUavDistanceOutput = document.querySelector("#interfererUavDistanceOutput");
 const frequencyInput = document.querySelector("#frequencyInput");
 const txPowerInput = document.querySelector("#txPowerInput");
 const txGainInput = document.querySelector("#txGainInput");
@@ -185,6 +189,33 @@ function calculateNoiseFloor(bandwidth, unit, noiseFigureDb) {
   return -174 + 10 * Math.log10(bandwidthHz) + noiseFigureDb;
 }
 
+function dbmToMilliwatts(dbm) {
+  return 10 ** (dbm / 10);
+}
+
+function milliwattsToDbm(milliwatts) {
+  return 10 * Math.log10(Math.max(milliwatts, 1e-30));
+}
+
+function calculateInterferenceRxDbm({
+  distanceKm,
+  frequencyMHz,
+  rxGainDbi,
+  uavHeightMeters,
+  interfererEnabled,
+  interfererDistanceMeters,
+  interfererPowerDbm
+}) {
+  if (!interfererEnabled) return null;
+  const uavToInterfererMeters = calculateInterfererUavDistanceMeters(distanceKm, uavHeightMeters, interfererDistanceMeters);
+  const fsplIntDb = calculateFspl(Math.max(uavToInterfererMeters / 1000, 0.001), frequencyMHz);
+  return interfererPowerDbm + rxGainDbi - fsplIntDb;
+}
+
+function calculateInterfererUavDistanceMeters(distanceKm, uavHeightMeters, interfererDistanceMeters) {
+  return Math.max(interfererDistanceMeters, 1);
+}
+
 function calculateLinkBudget({
   distanceKm,
   frequencyMHz,
@@ -198,16 +229,33 @@ function calculateLinkBudget({
   snrDb,
   gsHeightMeters,
   uavHeightMeters,
-  multipathModel
+  multipathModel,
+  interfererEnabled,
+  interfererDistanceMeters,
+  interfererPowerDbm
 }) {
   const path = calculatePathLoss(distanceKm, frequencyMHz, gsHeightMeters, uavHeightMeters, multipathModel);
   const rxLevelDbm = txPowerDbm + txGainDbi + rxGainDbi - path.pathLossDb + polarizationLossDb;
   const noiseFloorDbm = calculateNoiseFloor(bandwidth, bandwidthUnit, noiseFigureDb);
-  const requiredBySnrDbm = noiseFloorDbm + snrDb;
+  const interferenceRxDbm = calculateInterferenceRxDbm({
+    distanceKm,
+    frequencyMHz,
+    rxGainDbi,
+    uavHeightMeters,
+    interfererEnabled,
+    interfererDistanceMeters,
+    interfererPowerDbm
+  });
+  const totalNoiseDbm = milliwattsToDbm(
+    dbmToMilliwatts(noiseFloorDbm) + (interferenceRxDbm === null ? 0 : dbmToMilliwatts(interferenceRxDbm))
+  );
+  const requiredBySnrDbm = totalNoiseDbm + snrDb;
   return {
     ...path,
     rxLevelDbm,
     noiseFloorDbm,
+    interferenceRxDbm,
+    totalNoiseDbm,
     requiredBySnrDbm,
     linkMarginDb: rxLevelDbm - requiredBySnrDbm,
     isControllable: rxLevelDbm > requiredBySnrDbm
@@ -321,6 +369,24 @@ function createThreeScene(onDroneRotationChange = () => {}) {
   groundAntennaBase.position.set(groundAntennaBottom.x, groundAntennaBottom.y + 0.03, groundAntennaBottom.z);
   scene.add(groundAntennaBase);
 
+  const interfererGroup = new THREE.Group();
+  const interfererMat = new THREE.MeshBasicMaterial({
+    color: 0xff304f,
+    transparent: true,
+    opacity: 0.76
+  });
+  const interfererGlowMat = new THREE.MeshBasicMaterial({
+    color: 0xff304f,
+    transparent: true,
+    opacity: 0.18,
+    depthWrite: false
+  });
+  const interfererCore = new THREE.Mesh(new THREE.SphereGeometry(0.12, 28, 18), interfererMat);
+  const interfererGlow = new THREE.Mesh(new THREE.SphereGeometry(0.28, 32, 20), interfererGlowMat);
+  interfererGroup.add(interfererGlow, interfererCore);
+  interfererGroup.visible = false;
+  scene.add(interfererGroup);
+
   const uavGroup = new THREE.Group();
   uavGroup.position.copy(uavPosition);
   uavGroup.rotation.order = "YXZ";
@@ -431,7 +497,8 @@ function createThreeScene(onDroneRotationChange = () => {}) {
     ground: makeLabel("地面遙控器天線"),
     hard: makeLabel("機尾 433MHz 天線"),
     panel: makeLabel("腳架 2.4/5GHz 天線"),
-    theta: makeLabel("夾角 θ = 0°", "theta")
+    theta: makeLabel("夾角 θ = 0°", "theta"),
+    interferer: makeLabel("動態干擾源", "theta")
   };
   Object.values(labels).forEach((label) => labelLayer.appendChild(label));
 
@@ -529,7 +596,8 @@ function createThreeScene(onDroneRotationChange = () => {}) {
       { element: labels.ground, point: groundAntennaTop.clone() },
       { element: labels.hard, point: tailWorld.tip },
       { element: labels.panel, point: legWorld.tip },
-      { element: labels.theta, point: antennaWorldBase.clone().add(new THREE.Vector3(0.22, 0.32, 0)), text: `夾角 θ = ${thetaDegrees.toFixed(1)}°` }
+      { element: labels.theta, point: antennaWorldBase.clone().add(new THREE.Vector3(0.22, 0.32, 0)), text: `夾角 θ = ${thetaDegrees.toFixed(1)}°` },
+      { element: labels.interferer, point: interfererGroup.position.clone().add(new THREE.Vector3(0, 0.32, 0)) }
     ];
 
     const hostRect = host.getBoundingClientRect();
@@ -539,8 +607,24 @@ function createThreeScene(onDroneRotationChange = () => {}) {
       element.style.left = `${((screen.x + 1) / 2) * hostRect.width}px`;
       element.style.top = `${((-screen.y + 1) / 2) * hostRect.height}px`;
       const muted = element.classList.contains("muted");
-      element.style.opacity = screen.z > 1 ? "0" : muted ? "0.45" : "1";
+      element.style.opacity = element === labels.interferer && !interfererGroup.visible
+        ? "0"
+        : screen.z > 1 ? "0" : muted ? "0.45" : "1";
     });
+  }
+
+  function updateInterferer(enabled, interfererDistanceMeters, currentDistanceKm) {
+    interfererGroup.visible = enabled;
+    if (!enabled) return;
+    const currentDistanceMeters = Math.max(currentDistanceKm * 1000, 1);
+    const ratio = THREE.MathUtils.clamp(interfererDistanceMeters / currentDistanceMeters, 0, 1.35);
+    const groundX = groundAntennaBottom.x;
+    const uavX = uavGroup.position.x;
+    interfererGroup.position.set(
+      uavX + (groundX - uavX) * ratio,
+      uavGroup.position.y - 0.5,
+      0.72
+    );
   }
 
   function updatePitch(pitchDegrees, uavHeightMeters = currentUavHeightMeters) {
@@ -680,7 +764,7 @@ function createThreeScene(onDroneRotationChange = () => {}) {
   render();
   reportLog("Three.js render loop 已啟動");
 
-  return { updatePitch, setTargetAntenna };
+  return { updatePitch, setTargetAntenna, updateInterferer };
 }
 
 function createLossCurveChart() {
@@ -790,7 +874,8 @@ function createLossCurveChart() {
       });
       data.push({
         distanceMeters,
-        rxLevelDbm: budget.rxLevelDbm
+        rxLevelDbm: budget.rxLevelDbm,
+        requiredBySnrDbm: budget.requiredBySnrDbm
       });
     }
     return data;
@@ -807,10 +892,7 @@ function createLossCurveChart() {
       .curve(d3.curveLinear);
     const activeData = makeDistanceData(state, state.multipathModel);
     const fsplData = makeDistanceData(state, "fspl");
-    const thresholdData = [
-      { distanceMeters: 10, rxLevelDbm: state.requiredBySnrDbm },
-      { distanceMeters: 10000, rxLevelDbm: state.requiredBySnrDbm }
-    ];
+    const thresholdData = makeDistanceData(state, state.multipathModel);
 
     yGrid.call(d3.axisLeft(y).ticks(5).tickSize(-innerWidth).tickFormat("")).select(".domain").remove();
     xGrid.call(d3.axisBottom(x).tickValues([10, 30, 100, 300, 1000, 3000, 10000]).tickSize(-innerHeight).tickFormat("")).select(".domain").remove();
@@ -822,7 +904,12 @@ function createLossCurveChart() {
 
     path.datum(activeData).attr("d", line);
     referencePath.datum(fsplData).attr("d", state.multipathModel === "tworay" ? line : null);
-    thresholdPath.datum(thresholdData).attr("d", line);
+    thresholdPath
+      .datum(thresholdData)
+      .attr("d", d3.line()
+        .x((d) => x(d.distanceMeters))
+        .y((d) => y(d.requiredBySnrDbm))
+        .curve(d3.curveLinear));
 
     dot.attr("cx", x(Math.max(state.distanceKm * 1000, 10))).attr("cy", y(state.rxLevelDbm));
     dotLabel
@@ -884,6 +971,10 @@ function updateDashboard(thetaFromScene) {
   const distanceKm = positiveNumberFromInput(distanceInput, 1);
   const gsHeightMeters = clampedNumberFromInput(gsHeightInput, 1.5, 0.5, 20);
   const multipathModel = multipathModelInput?.value === "tworay" ? "tworay" : "fspl";
+  const interfererEnabled = Boolean(interfererEnabledInput?.checked);
+  const interfererDistanceMeters = clampedNumberFromInput(interfererDistanceInput, 2000, 1, 100000);
+  const interfererPowerDbm = numberFromInput(interfererPowerInput, 30);
+  const interfererUavDistanceMeters = calculateInterfererUavDistanceMeters(distanceKm, uavHeightMeters, interfererDistanceMeters);
   const frequencyMHz = positiveNumberFromInput(frequencyInput, 433);
   const txPowerDbm = numberFromInput(txPowerInput, 30);
   const txGainDbi = numberFromInput(txGainInput, 0);
@@ -905,8 +996,17 @@ function updateDashboard(thetaFromScene) {
     snrDb,
     gsHeightMeters,
     uavHeightMeters,
-    multipathModel
+    multipathModel,
+    interfererEnabled,
+    interfererDistanceMeters,
+    interfererPowerDbm
   });
+  threeScene?.updateInterferer(interfererEnabled, interfererDistanceMeters, distanceKm);
+  if (interfererUavDistanceOutput) {
+    interfererUavDistanceOutput.textContent = interfererEnabled
+      ? `${interfererUavDistanceMeters.toFixed(1)} 公尺`
+      : "--";
+  }
   const totalAttenuation = budget.pathLossDb + Math.abs(polarizationLoss);
 
   sliderValue.textContent = `${pitchDegrees}°`;
@@ -938,6 +1038,9 @@ function updateDashboard(thetaFromScene) {
       gsHeightMeters,
       uavHeightMeters,
       multipathModel,
+      interfererEnabled,
+      interfererDistanceMeters,
+      interfererPowerDbm,
       ...budget
     });
   }
@@ -950,6 +1053,9 @@ function updateDashboard(thetaFromScene) {
     uavHeightMeters,
     gsHeightMeters,
     multipathModel,
+    interfererEnabled,
+    interfererDistanceMeters,
+    interfererPowerDbm,
     frequencyMHz,
     txPowerDbm,
     txGainDbi,
@@ -960,6 +1066,8 @@ function updateDashboard(thetaFromScene) {
     snrDb,
     budget.pathLossDb.toFixed(2),
     budget.twoRayGainDb.toFixed(2),
+    budget.totalNoiseDbm.toFixed(2),
+    budget.interferenceRxDbm === null ? "off" : budget.interferenceRxDbm.toFixed(2),
     budget.isControllable
   ].join("|");
 
@@ -967,7 +1075,7 @@ function updateDashboard(thetaFromScene) {
     reportLog(
       "鏈路預算已更新",
       budget.isControllable ? "ok" : "warn",
-      `target=${ANTENNA_TARGETS[selectedAntennaTarget].name}, model=${multipathModel}, pathLoss=${budget.pathLossDb.toFixed(2)} dB, twoRayGain=${budget.twoRayGainDb.toFixed(2)} dB, Rx=${budget.rxLevelDbm.toFixed(2)} dBm, threshold=${budget.requiredBySnrDbm.toFixed(2)} dBm, margin=${budget.linkMarginDb.toFixed(2)} dB, state=${currentLinkState.textContent}`
+      `target=${ANTENNA_TARGETS[selectedAntennaTarget].name}, model=${multipathModel}, pathLoss=${budget.pathLossDb.toFixed(2)} dB, twoRayGain=${budget.twoRayGainDb.toFixed(2)} dB, noise=${budget.totalNoiseDbm.toFixed(2)} dBm, interference=${budget.interferenceRxDbm === null ? "off" : `${budget.interferenceRxDbm.toFixed(2)} dBm`}, Rx=${budget.rxLevelDbm.toFixed(2)} dBm, threshold=${budget.requiredBySnrDbm.toFixed(2)} dBm, margin=${budget.linkMarginDb.toFixed(2)} dB, state=${currentLinkState.textContent}`
     );
     lastLoggedSignature = signature;
   }
@@ -1006,6 +1114,9 @@ async function boot() {
       uavHeightInput,
       gsHeightInput,
       multipathModelInput,
+      interfererEnabledInput,
+      interfererDistanceInput,
+      interfererPowerInput,
       frequencyInput,
       txPowerInput,
       txGainInput,
