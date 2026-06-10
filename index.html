@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>無人機硬式天線極化錯位損耗計算器 - 3D 互動升級版</title>
-  <link rel="stylesheet" href="styles.css?v=20260609-metrics-horizontal1">
+  <link rel="stylesheet" href="styles.css?v=20260610-two-ray1">
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 </head>
@@ -53,7 +53,7 @@
             <strong id="currentLoss">0.00 dB</strong>
           </div>
           <div class="metric">
-            <span>自由空間路徑損耗 (FSPL)</span>
+            <span>路徑損耗 (Path Loss)</span>
             <strong id="currentFspl">0.00 dB</strong>
           </div>
           <div class="metric">
@@ -85,6 +85,19 @@
             <h2 id="control-title">控制區</h2>
             <span id="sliderValue" class="angle-chip">0°</span>
           </div>
+          <fieldset class="target-switch" aria-labelledby="target-antenna-title">
+            <legend id="target-antenna-title">選擇分析天線 (Target Antenna)</legend>
+            <div class="target-options">
+              <label>
+                <input type="radio" name="targetAntenna" value="tail" checked>
+                <span>機尾 433MHz 天線</span>
+              </label>
+              <label>
+                <input type="radio" name="targetAntenna" value="leg">
+                <span>腳架 2.4/5GHz 天線</span>
+              </label>
+            </div>
+          </fieldset>
           <label for="pitchSlider">無人機俯仰角 (Pitch Angle)</label>
           <div class="slider-row">
             <span>0°</span>
@@ -97,6 +110,29 @@
               <div class="number-field">
                 <input id="distanceInput" type="number" min="0.001" step="0.1" value="1">
                 <span>公里</span>
+              </div>
+            </label>
+            <label for="uavHeightInput">
+              <span>無人機高度 (UAV Height)</span>
+              <div class="number-field">
+                <input id="uavHeightInput" type="number" min="1" max="500" step="1" value="50">
+                <span>公尺</span>
+              </div>
+            </label>
+            <label for="gsHeightInput">
+              <span>地面站高度 (GS Height)</span>
+              <div class="number-field">
+                <input id="gsHeightInput" type="number" min="0.5" max="20" step="0.1" value="1.5">
+                <span>公尺</span>
+              </div>
+            </label>
+            <label for="multipathModelInput">
+              <span>多重路徑環境 (Multipath Model)</span>
+              <div class="number-field">
+                <select id="multipathModelInput">
+                  <option value="fspl" selected>純自由空間 (FSPL Only)</option>
+                  <option value="tworay">雙射線地表反射 (Two-Ray Ground Reflection)</option>
+                </select>
               </div>
             </label>
             <label for="frequencyInput">
@@ -156,8 +192,14 @@
 
         <section class="panel chart-panel" aria-labelledby="chart-title">
           <div class="section-heading">
-            <h2 id="chart-title">數據圖表區</h2>
-            <span>Lpol = 20 × log10(cos θ)</span>
+            <div>
+              <h2 id="chart-title">數據圖表區</h2>
+              <span id="chartSubtitle">Lpol = 20 × log10(cos θ)</span>
+            </div>
+            <div class="chart-mode-switch" aria-label="圖表 X 軸模式">
+              <button type="button" class="active" data-chart-mode="pitch">X 軸：俯仰角</button>
+              <button type="button" data-chart-mode="distance">X 軸：距離</button>
+            </div>
           </div>
           <div id="lossCurveChart" class="chart-host"></div>
         </section>
@@ -165,6 +207,6 @@
     </section>
   </main>
 
-  <script defer src="script.js?v=20260609-threshold1"></script>
+  <script defer src="script.js?v=20260610-two-ray2"></script>
 </body>
 </html>

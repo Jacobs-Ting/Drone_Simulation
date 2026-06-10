@@ -1,7 +1,11 @@
 const d3 = window.d3;
+const targetAntennaInputs = document.querySelectorAll('input[name="targetAntenna"]');
 const slider = document.querySelector("#pitchSlider");
 const sliderValue = document.querySelector("#sliderValue");
 const distanceInput = document.querySelector("#distanceInput");
+const uavHeightInput = document.querySelector("#uavHeightInput");
+const gsHeightInput = document.querySelector("#gsHeightInput");
+const multipathModelInput = document.querySelector("#multipathModelInput");
 const frequencyInput = document.querySelector("#frequencyInput");
 const txPowerInput = document.querySelector("#txPowerInput");
 const txGainInput = document.querySelector("#txGainInput");
@@ -22,6 +26,58 @@ const currentLinkState = document.querySelector("#currentLinkState");
 const linkStateCard = document.querySelector("#linkStateCard");
 const debugLog = document.querySelector("#debugLog");
 const debugStatus = document.querySelector("#debugStatus");
+const chartSubtitle = document.querySelector("#chartSubtitle");
+const chartModeButtons = document.querySelectorAll("[data-chart-mode]");
+
+const SPEED_OF_LIGHT = 3e8;
+
+const ANTENNA_TARGETS = {
+  tail: {
+    name: "機尾 433MHz 天線",
+    frequencyMHz: 433,
+    localDirection: normalizeVector({ x: 0, y: 1, z: 0 })
+  },
+  leg: {
+    name: "腳架 2.4/5GHz 天線",
+    frequencyMHz: 2400,
+    localDirection: normalizeVector({ x: -0.18, y: 0.92, z: 0.34 })
+  }
+};
+
+let selectedAntennaTarget = "tail";
+let activeChartMode = "pitch";
+
+function normalizeVector(vector) {
+  const length = Math.hypot(vector.x, vector.y, vector.z) || 1;
+  return {
+    x: vector.x / length,
+    y: vector.y / length,
+    z: vector.z / length
+  };
+}
+
+function getSelectedAntennaTarget() {
+  const checked = document.querySelector('input[name="targetAntenna"]:checked');
+  return ANTENNA_TARGETS[checked?.value] ? checked.value : "tail";
+}
+
+function rotateLocalVectorForPitch(vector, pitchDegrees) {
+  const angle = -pitchDegrees * (Math.PI / 180);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return normalizeVector({
+    x: vector.x * cos - vector.y * sin,
+    y: vector.x * sin + vector.y * cos,
+    z: vector.z
+  });
+}
+
+function calculateTargetTheta(targetKey, pitchDegrees) {
+  const target = ANTENNA_TARGETS[targetKey] || ANTENNA_TARGETS.tail;
+  const direction = rotateLocalVectorForPitch(target.localDirection, pitchDegrees);
+  const dot = Math.max(-1, Math.min(1, direction.y));
+  return Math.acos(dot) * (180 / Math.PI);
+}
 
 function reportLog(message, level = "ok", detail = "") {
   const time = new Date().toLocaleTimeString("zh-TW", { hour12: false });
@@ -88,8 +144,36 @@ function nonNegativeNumberFromInput(input, fallback) {
   return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
+function clampedNumberFromInput(input, fallback, min, max) {
+  const value = Number(input?.value);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
 function calculateFspl(distanceKm, frequencyMHz) {
   return 32.44 + 20 * Math.log10(distanceKm) + 20 * Math.log10(frequencyMHz);
+}
+
+function calculateTwoRayGainDb(distanceMeters, gsHeightMeters, uavHeightMeters, frequencyMHz) {
+  const wavelength = SPEED_OF_LIGHT / (frequencyMHz * 1000000);
+  const losDistance = Math.sqrt(distanceMeters ** 2 + (gsHeightMeters - uavHeightMeters) ** 2);
+  const reflectedDistance = Math.sqrt(distanceMeters ** 2 + (gsHeightMeters + uavHeightMeters) ** 2);
+  const phaseDiff = (2 * Math.PI * (reflectedDistance - losDistance)) / wavelength;
+  const interferenceLinear = Math.max(2 - 2 * Math.cos(phaseDiff), 0.001);
+  return 10 * Math.log10(interferenceLinear);
+}
+
+function calculatePathLoss(distanceKm, frequencyMHz, gsHeightMeters, uavHeightMeters, multipathModel) {
+  const fsplDb = calculateFspl(distanceKm, frequencyMHz);
+  const distanceMeters = Math.max(distanceKm * 1000, 0.001);
+  const twoRayGainDb = multipathModel === "tworay"
+    ? calculateTwoRayGainDb(distanceMeters, gsHeightMeters, uavHeightMeters, frequencyMHz)
+    : 0;
+  return {
+    fsplDb,
+    twoRayGainDb,
+    pathLossDb: fsplDb - twoRayGainDb
+  };
 }
 
 function bandwidthToHz(bandwidth, unit) {
@@ -99,6 +183,35 @@ function bandwidthToHz(bandwidth, unit) {
 function calculateNoiseFloor(bandwidth, unit, noiseFigureDb) {
   const bandwidthHz = bandwidthToHz(bandwidth, unit);
   return -174 + 10 * Math.log10(bandwidthHz) + noiseFigureDb;
+}
+
+function calculateLinkBudget({
+  distanceKm,
+  frequencyMHz,
+  txPowerDbm,
+  txGainDbi,
+  rxGainDbi,
+  polarizationLossDb,
+  noiseFigureDb,
+  bandwidth,
+  bandwidthUnit,
+  snrDb,
+  gsHeightMeters,
+  uavHeightMeters,
+  multipathModel
+}) {
+  const path = calculatePathLoss(distanceKm, frequencyMHz, gsHeightMeters, uavHeightMeters, multipathModel);
+  const rxLevelDbm = txPowerDbm + txGainDbi + rxGainDbi - path.pathLossDb + polarizationLossDb;
+  const noiseFloorDbm = calculateNoiseFloor(bandwidth, bandwidthUnit, noiseFigureDb);
+  const requiredBySnrDbm = noiseFloorDbm + snrDb;
+  return {
+    ...path,
+    rxLevelDbm,
+    noiseFloorDbm,
+    requiredBySnrDbm,
+    linkMarginDb: rxLevelDbm - requiredBySnrDbm,
+    isControllable: rxLevelDbm > requiredBySnrDbm
+  };
 }
 
 function createCylinderBetween(start, end, radius, material) {
@@ -290,9 +403,15 @@ function createThreeScene(onDroneRotationChange = () => {}) {
 
   const rearAntennaBase = new THREE.Vector3(-1.18, 0.25, 0);
   const rearAntennaTip = new THREE.Vector3(-1.18, 1.42, 0);
-  const hardAntenna = createCylinderBetween(rearAntennaBase, rearAntennaTip, 0.028, greenMat);
-  uavGroup.add(hardAntenna);
-  reportLog("無人機硬式天線已加入 uavGroup");
+  const tailAntenna = createCylinderBetween(rearAntennaBase, rearAntennaTip, 0.028, greenMat);
+  uavGroup.add(tailAntenna);
+  reportLog("機尾 433MHz 天線已加入 uavGroup");
+
+  const legAntennaBase = new THREE.Vector3(0.72, -0.68, 0.48);
+  const legAntennaTip = legAntennaBase.clone().add(new THREE.Vector3(-0.18, 0.92, 0.34).normalize().multiplyScalar(0.94));
+  const legAntenna = createCylinderBetween(legAntennaBase, legAntennaTip, 0.026, amberMat);
+  uavGroup.add(legAntenna);
+  reportLog("腳架 2.4/5GHz 天線已加入 uavGroup");
 
   const wifiPanel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.46, 0.34), amberMat);
   wifiPanel.position.set(0.62, -0.54, 0.48);
@@ -310,19 +429,47 @@ function createThreeScene(onDroneRotationChange = () => {}) {
 
   const labels = {
     ground: makeLabel("地面遙控器天線"),
-    hard: makeLabel("無人機硬式天線"),
-    panel: makeLabel("2.4/5 GHz 天線"),
+    hard: makeLabel("機尾 433MHz 天線"),
+    panel: makeLabel("腳架 2.4/5GHz 天線"),
     theta: makeLabel("夾角 θ = 0°", "theta")
   };
   Object.values(labels).forEach((label) => labelLayer.appendChild(label));
 
-  const localBase = rearAntennaBase.clone();
-  const localTip = rearAntennaTip.clone();
+  const antennaTargets = {
+    tail: {
+      label: labels.hard,
+      name: ANTENNA_TARGETS.tail.name,
+      mesh: tailAntenna,
+      base: rearAntennaBase.clone(),
+      tip: rearAntennaTip.clone(),
+      activeMaterial: greenMat,
+      inactiveMaterial: greenMat.clone(),
+      color: 0x47f0a6
+    },
+    leg: {
+      label: labels.panel,
+      name: ANTENNA_TARGETS.leg.name,
+      mesh: legAntenna,
+      base: legAntennaBase.clone(),
+      tip: legAntennaTip.clone(),
+      activeMaterial: amberMat,
+      inactiveMaterial: amberMat.clone(),
+      color: 0xffbd55
+    }
+  };
+  Object.values(antennaTargets).forEach((target) => {
+    target.inactiveMaterial.transparent = true;
+    target.inactiveMaterial.opacity = 0.24;
+    target.inactiveMaterial.emissive.setHex(0x000000);
+  });
+
   const antennaWorldBase = new THREE.Vector3();
   const antennaWorldTip = new THREE.Vector3();
   const antennaWorldDirection = new THREE.Vector3();
+  let activeAntennaKey = selectedAntennaTarget;
   let latestThetaDegrees = 0;
   let currentPitchDegrees = 0;
+  let currentUavHeightMeters = 50;
   let uavYaw = 0;
   let uavTilt = 0;
   let isDraggingDrone = false;
@@ -330,6 +477,8 @@ function createThreeScene(onDroneRotationChange = () => {}) {
   let workspaceZoom = Number.parseFloat(hostStyle.getPropertyValue("--scene-workspace-zoom")) || 1;
 
   function applyUavRotation() {
+    const normalizedHeight = THREE.MathUtils.clamp((currentUavHeightMeters - 1) / 499, 0, 1);
+    uavGroup.position.y = -0.2 + normalizedHeight * 1.15;
     uavGroup.rotation.set(
       uavTilt,
       uavYaw,
@@ -357,11 +506,29 @@ function createThreeScene(onDroneRotationChange = () => {}) {
     return points;
   }
 
+  function getAntennaWorldPoints(targetKey) {
+    const target = antennaTargets[targetKey] || antennaTargets.tail;
+    return {
+      base: target.base.clone().applyMatrix4(uavGroup.matrixWorld),
+      tip: target.tip.clone().applyMatrix4(uavGroup.matrixWorld)
+    };
+  }
+
+  function applyAntennaFocus() {
+    Object.entries(antennaTargets).forEach(([key, target]) => {
+      const isActive = key === activeAntennaKey;
+      target.mesh.material = isActive ? target.activeMaterial : target.inactiveMaterial;
+      target.label.classList.toggle("muted", !isActive);
+    });
+  }
+
   function updateLabels(thetaDegrees) {
+    const tailWorld = getAntennaWorldPoints("tail");
+    const legWorld = getAntennaWorldPoints("leg");
     const projected = [
       { element: labels.ground, point: groundAntennaTop.clone() },
-      { element: labels.hard, point: antennaWorldTip.clone() },
-      { element: labels.panel, point: new THREE.Vector3(0.62, -0.54, 0.48).applyMatrix4(uavGroup.matrixWorld) },
+      { element: labels.hard, point: tailWorld.tip },
+      { element: labels.panel, point: legWorld.tip },
       { element: labels.theta, point: antennaWorldBase.clone().add(new THREE.Vector3(0.22, 0.32, 0)), text: `夾角 θ = ${thetaDegrees.toFixed(1)}°` }
     ];
 
@@ -371,17 +538,20 @@ function createThreeScene(onDroneRotationChange = () => {}) {
       const screen = point.clone().project(camera);
       element.style.left = `${((screen.x + 1) / 2) * hostRect.width}px`;
       element.style.top = `${((-screen.y + 1) / 2) * hostRect.height}px`;
-      element.style.opacity = screen.z > 1 ? "0" : "1";
+      const muted = element.classList.contains("muted");
+      element.style.opacity = screen.z > 1 ? "0" : muted ? "0.45" : "1";
     });
   }
 
-  function updatePitch(pitchDegrees) {
+  function updatePitch(pitchDegrees, uavHeightMeters = currentUavHeightMeters) {
     currentPitchDegrees = pitchDegrees;
+    currentUavHeightMeters = uavHeightMeters;
     applyUavRotation();
     uavGroup.updateMatrixWorld(true);
 
-    antennaWorldBase.copy(localBase).applyMatrix4(uavGroup.matrixWorld);
-    antennaWorldTip.copy(localTip).applyMatrix4(uavGroup.matrixWorld);
+    const activeTarget = antennaTargets[activeAntennaKey] || antennaTargets.tail;
+    antennaWorldBase.copy(activeTarget.base).applyMatrix4(uavGroup.matrixWorld);
+    antennaWorldTip.copy(activeTarget.tip).applyMatrix4(uavGroup.matrixWorld);
     antennaWorldDirection.subVectors(antennaWorldTip, antennaWorldBase).normalize();
 
     const dot = THREE.MathUtils.clamp(antennaWorldDirection.dot(worldUp), -1, 1);
@@ -396,7 +566,7 @@ function createThreeScene(onDroneRotationChange = () => {}) {
           antennaWorldBase.clone().addScaledVector(antennaWorldDirection, -0.55),
           antennaWorldTip.clone().addScaledVector(antennaWorldDirection, 0.8)
         ],
-        0x47f0a6
+        activeTarget.color
       )
     );
     guideGroup.add(createDashedLine([groundAntennaTop.clone(), antennaWorldTip.clone()], 0xffbd55));
@@ -406,6 +576,12 @@ function createThreeScene(onDroneRotationChange = () => {}) {
     updateLabels(thetaDegrees);
 
     return thetaDegrees;
+  }
+
+  function setTargetAntenna(targetKey, uavHeightMeters = currentUavHeightMeters) {
+    activeAntennaKey = antennaTargets[targetKey] ? targetKey : "tail";
+    applyAntennaFocus();
+    return updatePitch(currentPitchDegrees, uavHeightMeters);
   }
 
   function updateDroneFromPointer(event) {
@@ -489,6 +665,7 @@ function createThreeScene(onDroneRotationChange = () => {}) {
   resize();
   logProjectedCenter();
   reportLog("Renderer 尺寸已同步", "ok", `${host.clientWidth}x${host.clientHeight}`);
+  applyAntennaFocus();
   updatePitch(0);
   reportLog("初始俯仰角已更新", "ok", "0 度");
 
@@ -503,7 +680,7 @@ function createThreeScene(onDroneRotationChange = () => {}) {
   render();
   reportLog("Three.js render loop 已啟動");
 
-  return { updatePitch };
+  return { updatePitch, setTargetAntenna };
 }
 
 function createLossCurveChart() {
@@ -532,91 +709,181 @@ function createLossCurveChart() {
     .attr("fill", "#071217")
     .attr("stroke", "rgba(98, 153, 169, 0.18)");
 
-  const x = d3.scaleLinear().domain([0, 90]).range([0, innerWidth]);
-  const y = d3.scaleLinear().domain([-20, 0]).range([innerHeight, 0]);
   const chart = svg.append("g").attr("transform", `translate(${margin.left}, ${margin.top})`);
-
-  chart
-    .append("g")
-    .attr("class", "grid")
-    .call(d3.axisLeft(y).ticks(5).tickSize(-innerWidth).tickFormat(""))
-    .select(".domain")
-    .remove();
-
-  chart
-    .append("g")
-    .attr("class", "grid")
-    .attr("transform", `translate(0, ${innerHeight})`)
-    .call(d3.axisBottom(x).ticks(6).tickSize(-innerHeight).tickFormat(""))
-    .select(".domain")
-    .remove();
-
-  chart
-    .append("g")
-    .attr("class", "axis")
-    .attr("transform", `translate(0, ${innerHeight})`)
-    .call(d3.axisBottom(x).ticks(6).tickFormat((d) => `${d}°`));
-
-  chart
-    .append("g")
-    .attr("class", "axis")
-    .call(d3.axisLeft(y).ticks(5).tickFormat((d) => `${d} dB`));
-
-  svg
+  const yGrid = chart.append("g").attr("class", "grid");
+  const xGrid = chart.append("g").attr("class", "grid").attr("transform", `translate(0, ${innerHeight})`);
+  const xAxis = chart.append("g").attr("class", "axis").attr("transform", `translate(0, ${innerHeight})`);
+  const yAxis = chart.append("g").attr("class", "axis");
+  const xLabel = svg
     .append("text")
     .attr("class", "chart-label")
     .attr("x", margin.left + innerWidth / 2)
     .attr("y", height - 14)
-    .attr("text-anchor", "middle")
-    .text("無人機俯仰角");
-
-  svg
+    .attr("text-anchor", "middle");
+  const yLabel = svg
     .append("text")
     .attr("class", "chart-label")
     .attr("x", 18)
     .attr("y", margin.top + innerHeight / 2)
     .attr("text-anchor", "middle")
-    .attr("transform", `rotate(-90, 18, ${margin.top + innerHeight / 2})`)
-    .text("極化損耗 (dB)");
+    .attr("transform", `rotate(-90, 18, ${margin.top + innerHeight / 2})`);
 
-  const data = d3.range(0, 91).map((pitch) => ({
-    pitch,
-    loss: clampLoss(pitch)
-  }));
+  const path = chart.append("path").attr("class", "loss-line");
+  const referencePath = chart.append("path").attr("class", "reference-line");
+  const thresholdPath = chart.append("path").attr("class", "threshold-line");
+  let activeTargetKey = selectedAntennaTarget;
+  let latestState = null;
 
-  const line = d3
-    .line()
-    .x((d) => x(d.pitch))
-    .y((d) => y(d.loss))
-    .curve(d3.curveMonotoneX);
+  function makeCurveData(targetKey) {
+    return d3.range(0, 91).map((pitch) => ({
+      pitch,
+      loss: clampLoss(calculateTargetTheta(targetKey, pitch))
+    }));
+  }
 
-  chart.append("path").datum(data).attr("class", "loss-line").attr("d", line);
-  reportLog("D3 損耗曲線已繪製", "ok", `${data.length} 個資料點`);
+  function drawPitchMode(targetKey, state) {
+    const x = d3.scaleLinear().domain([0, 90]).range([0, innerWidth]);
+    const y = d3.scaleLinear().domain([-20, 0]).range([innerHeight, 0]);
+    const line = d3
+      .line()
+      .x((d) => x(d.pitch))
+      .y((d) => y(d.loss))
+      .curve(d3.curveMonotoneX);
+    const data = makeCurveData(targetKey);
 
-  const dot = chart.append("circle").attr("class", "highlight-dot").attr("r", 7);
-  const dotLabel = chart.append("text").attr("class", "chart-label").attr("fill", "#ffbd55").attr("text-anchor", "middle");
+    yGrid.call(d3.axisLeft(y).ticks(5).tickSize(-innerWidth).tickFormat("")).select(".domain").remove();
+    xGrid.call(d3.axisBottom(x).ticks(6).tickSize(-innerHeight).tickFormat("")).select(".domain").remove();
+    xAxis.call(d3.axisBottom(x).ticks(6).tickFormat((d) => `${d}°`));
+    yAxis.call(d3.axisLeft(y).ticks(5).tickFormat((d) => `${d} dB`));
+    xLabel.text("無人機俯仰角");
+    yLabel.text("極化損耗 (dB)");
+    if (chartSubtitle) chartSubtitle.textContent = "Lpol = 20 × log10(cos θ)";
 
-  function update(pitchDegrees, thetaDegrees) {
+    path.datum(data).attr("d", line);
+    referencePath.attr("d", null);
+    thresholdPath.attr("d", null);
+
+    const pitchDegrees = state?.pitchDegrees ?? Number(slider.value);
+    const thetaDegrees = state?.thetaDegrees ?? calculateTargetTheta(targetKey, pitchDegrees);
     const loss = clampLoss(thetaDegrees);
     dot.attr("cx", x(pitchDegrees)).attr("cy", y(loss));
     dotLabel
       .attr("x", x(pitchDegrees))
       .attr("y", y(loss) - 14)
       .text(`${loss.toFixed(2)} dB`);
+    reportLog("D3 損耗曲線已繪製", "ok", `${ANTENNA_TARGETS[targetKey]?.name || "目標天線"}，${data.length} 個資料點`);
   }
 
-  return { update };
+  function makeDistanceData(state, forcedModel) {
+    const data = [];
+    const minMeters = 10;
+    const maxMeters = 10000;
+    const steps = 240;
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      const distanceMeters = minMeters * ((maxMeters / minMeters) ** t);
+      const distanceKm = distanceMeters / 1000;
+      const budget = calculateLinkBudget({
+        ...state,
+        distanceKm,
+        multipathModel: forcedModel
+      });
+      data.push({
+        distanceMeters,
+        rxLevelDbm: budget.rxLevelDbm
+      });
+    }
+    return data;
+  }
+
+  function drawDistanceMode(state) {
+    if (!state) return;
+    const x = d3.scaleLog().domain([10, 10000]).range([0, innerWidth]).clamp(true);
+    const y = d3.scaleLinear().domain([-130, -30]).range([innerHeight, 0]).clamp(true);
+    const line = d3
+      .line()
+      .x((d) => x(d.distanceMeters))
+      .y((d) => y(d.rxLevelDbm))
+      .curve(d3.curveLinear);
+    const activeData = makeDistanceData(state, state.multipathModel);
+    const fsplData = makeDistanceData(state, "fspl");
+    const thresholdData = [
+      { distanceMeters: 10, rxLevelDbm: state.requiredBySnrDbm },
+      { distanceMeters: 10000, rxLevelDbm: state.requiredBySnrDbm }
+    ];
+
+    yGrid.call(d3.axisLeft(y).ticks(5).tickSize(-innerWidth).tickFormat("")).select(".domain").remove();
+    xGrid.call(d3.axisBottom(x).tickValues([10, 30, 100, 300, 1000, 3000, 10000]).tickSize(-innerHeight).tickFormat("")).select(".domain").remove();
+    xAxis.call(d3.axisBottom(x).tickValues([10, 30, 100, 300, 1000, 3000, 10000]).tickFormat((d) => `${d >= 1000 ? d / 1000 : d}${d >= 1000 ? "km" : "m"}`));
+    yAxis.call(d3.axisLeft(y).ticks(5).tickFormat((d) => `${d} dBm`));
+    xLabel.text("距離");
+    yLabel.text("接收功率 Rx Level (dBm)");
+    if (chartSubtitle) chartSubtitle.textContent = state.multipathModel === "tworay" ? "Two-Ray 與 FSPL 接收功率對照" : "純 FSPL 接收功率曲線";
+
+    path.datum(activeData).attr("d", line);
+    referencePath.datum(fsplData).attr("d", state.multipathModel === "tworay" ? line : null);
+    thresholdPath.datum(thresholdData).attr("d", line);
+
+    dot.attr("cx", x(Math.max(state.distanceKm * 1000, 10))).attr("cy", y(state.rxLevelDbm));
+    dotLabel
+      .attr("x", x(Math.max(state.distanceKm * 1000, 10)))
+      .attr("y", y(state.rxLevelDbm) - 14)
+      .text(`${state.rxLevelDbm.toFixed(1)} dBm`);
+  }
+
+  function redraw(state = latestState) {
+    latestState = state || latestState;
+    if (activeChartMode === "distance") {
+      drawDistanceMode(latestState);
+    } else {
+      drawPitchMode(activeTargetKey, latestState);
+    }
+  }
+
+  const dot = chart.append("circle").attr("class", "highlight-dot").attr("r", 7);
+  const dotLabel = chart.append("text").attr("class", "chart-label").attr("fill", "#ffbd55").attr("text-anchor", "middle");
+  redraw();
+
+  function update(state) {
+    redraw(state);
+  }
+
+  function setTargetAntenna(targetKey) {
+    activeTargetKey = ANTENNA_TARGETS[targetKey] ? targetKey : "tail";
+    redraw();
+  }
+
+  function setMode(mode) {
+    activeChartMode = mode === "distance" ? "distance" : "pitch";
+    redraw();
+  }
+
+  return { update, setTargetAntenna, setMode };
 }
 
 let threeScene;
 let chart;
 let lastLoggedSignature = "";
 
+function applyTargetAntennaSelection() {
+  selectedAntennaTarget = getSelectedAntennaTarget();
+  const target = ANTENNA_TARGETS[selectedAntennaTarget] || ANTENNA_TARGETS.tail;
+  const uavHeightMeters = clampedNumberFromInput(uavHeightInput, 50, 1, 500);
+  frequencyInput.value = target.frequencyMHz;
+  const thetaDegrees = threeScene?.setTargetAntenna(selectedAntennaTarget, uavHeightMeters);
+  chart?.setTargetAntenna(selectedAntennaTarget);
+  updateDashboard(thetaDegrees);
+  reportLog("分析天線已切換", "ok", `${target.name}，頻率=${target.frequencyMHz} MHz`);
+}
+
 function updateDashboard(thetaFromScene) {
   const pitchDegrees = Number(slider.value);
-  const thetaDegrees = typeof thetaFromScene === "number" ? thetaFromScene : threeScene.updatePitch(pitchDegrees);
+  const uavHeightMeters = clampedNumberFromInput(uavHeightInput, 50, 1, 500);
+  const thetaDegrees = typeof thetaFromScene === "number" ? thetaFromScene : threeScene.updatePitch(pitchDegrees, uavHeightMeters);
   const polarizationLoss = clampLoss(thetaDegrees);
   const distanceKm = positiveNumberFromInput(distanceInput, 1);
+  const gsHeightMeters = clampedNumberFromInput(gsHeightInput, 1.5, 0.5, 20);
+  const multipathModel = multipathModelInput?.value === "tworay" ? "tworay" : "fspl";
   const frequencyMHz = positiveNumberFromInput(frequencyInput, 433);
   const txPowerDbm = numberFromInput(txPowerInput, 30);
   const txGainDbi = numberFromInput(txGainInput, 0);
@@ -625,34 +892,64 @@ function updateDashboard(thetaFromScene) {
   const bandwidth = positiveNumberFromInput(bandwidthInput, 125);
   const bandwidthUnit = bandwidthUnitInput?.value === "MHz" ? "MHz" : "kHz";
   const snrDb = numberFromInput(snrInput, 0);
-  const fspl = calculateFspl(distanceKm, frequencyMHz);
-  const totalAttenuation = fspl + Math.abs(polarizationLoss);
-  const rxLevelDbm = txPowerDbm + txGainDbi + rxGainDbi - fspl + polarizationLoss;
-  const noiseFloorDbm = calculateNoiseFloor(bandwidth, bandwidthUnit, noiseFigureDb);
-  const requiredBySnrDbm = noiseFloorDbm + snrDb;
-  const linkMarginDb = rxLevelDbm - requiredBySnrDbm;
-  const isControllable = rxLevelDbm > requiredBySnrDbm;
+  const budget = calculateLinkBudget({
+    distanceKm,
+    frequencyMHz,
+    txPowerDbm,
+    txGainDbi,
+    rxGainDbi,
+    polarizationLossDb: polarizationLoss,
+    noiseFigureDb,
+    bandwidth,
+    bandwidthUnit,
+    snrDb,
+    gsHeightMeters,
+    uavHeightMeters,
+    multipathModel
+  });
+  const totalAttenuation = budget.pathLossDb + Math.abs(polarizationLoss);
 
   sliderValue.textContent = `${pitchDegrees}°`;
   currentPitch.textContent = `${pitchDegrees} 度`;
   currentTheta.textContent = `${thetaDegrees.toFixed(1)} 度`;
   currentLoss.textContent = `${polarizationLoss.toFixed(2)} dB`;
-  currentFspl.textContent = `${fspl.toFixed(2)} dB`;
+  currentFspl.textContent = `${budget.pathLossDb.toFixed(2)} dB`;
   currentTotalLoss.textContent = `-${totalAttenuation.toFixed(2)} dB`;
-  currentRxLevel.textContent = `${rxLevelDbm.toFixed(2)} dBm`;
-  currentRequiredSignal.textContent = `${requiredBySnrDbm.toFixed(2)} dBm`;
-  currentLinkMargin.textContent = `${linkMarginDb.toFixed(2)} dB`;
-  currentLinkState.textContent = isControllable ? "無人機可控" : "無人機失控";
-  linkStateCard.classList.toggle("controlled", isControllable);
-  linkStateCard.classList.toggle("lost", !isControllable);
+  currentRxLevel.textContent = `${budget.rxLevelDbm.toFixed(2)} dBm`;
+  currentRequiredSignal.textContent = `${budget.requiredBySnrDbm.toFixed(2)} dBm`;
+  currentLinkMargin.textContent = `${budget.linkMarginDb.toFixed(2)} dB`;
+  currentLinkState.textContent = budget.isControllable ? "無人機可控" : "無人機失控";
+  linkStateCard.classList.toggle("controlled", budget.isControllable);
+  linkStateCard.classList.toggle("lost", !budget.isControllable);
   if (chart) {
-    chart.update(pitchDegrees, thetaDegrees);
+    chart.update({
+      pitchDegrees,
+      thetaDegrees,
+      distanceKm,
+      frequencyMHz,
+      txPowerDbm,
+      txGainDbi,
+      rxGainDbi,
+      polarizationLossDb: polarizationLoss,
+      noiseFigureDb,
+      bandwidth,
+      bandwidthUnit,
+      snrDb,
+      gsHeightMeters,
+      uavHeightMeters,
+      multipathModel,
+      ...budget
+    });
   }
 
   const signature = [
     pitchDegrees,
+    selectedAntennaTarget,
     thetaDegrees.toFixed(1),
     distanceKm,
+    uavHeightMeters,
+    gsHeightMeters,
+    multipathModel,
     frequencyMHz,
     txPowerDbm,
     txGainDbi,
@@ -661,14 +958,16 @@ function updateDashboard(thetaFromScene) {
     bandwidth,
     bandwidthUnit,
     snrDb,
-    isControllable
+    budget.pathLossDb.toFixed(2),
+    budget.twoRayGainDb.toFixed(2),
+    budget.isControllable
   ].join("|");
 
   if (signature !== lastLoggedSignature) {
     reportLog(
       "鏈路預算已更新",
-      isControllable ? "ok" : "warn",
-      `Rx=${rxLevelDbm.toFixed(2)} dBm, threshold=${requiredBySnrDbm.toFixed(2)} dBm, margin=${linkMarginDb.toFixed(2)} dB, state=${currentLinkState.textContent}`
+      budget.isControllable ? "ok" : "warn",
+      `target=${ANTENNA_TARGETS[selectedAntennaTarget].name}, model=${multipathModel}, pathLoss=${budget.pathLossDb.toFixed(2)} dB, twoRayGain=${budget.twoRayGainDb.toFixed(2)} dB, Rx=${budget.rxLevelDbm.toFixed(2)} dBm, threshold=${budget.requiredBySnrDbm.toFixed(2)} dBm, margin=${budget.linkMarginDb.toFixed(2)} dB, state=${currentLinkState.textContent}`
     );
     lastLoggedSignature = signature;
   }
@@ -690,9 +989,23 @@ async function boot() {
 
     threeScene = createThreeScene((thetaDegrees) => updateDashboard(thetaDegrees));
     chart = createLossCurveChart();
+    targetAntennaInputs.forEach((input) => {
+      input.addEventListener("change", applyTargetAntennaSelection);
+    });
+    chartModeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        activeChartMode = button.dataset.chartMode === "distance" ? "distance" : "pitch";
+        chartModeButtons.forEach((modeButton) => modeButton.classList.toggle("active", modeButton === button));
+        chart?.setMode(activeChartMode);
+        updateDashboard();
+      });
+    });
     slider.addEventListener("input", updateDashboard);
     [
       distanceInput,
+      uavHeightInput,
+      gsHeightInput,
+      multipathModelInput,
       frequencyInput,
       txPowerInput,
       txGainInput,
@@ -705,7 +1018,7 @@ async function boot() {
       input.addEventListener("input", () => updateDashboard());
       input.addEventListener("change", () => updateDashboard());
     });
-    updateDashboard();
+    applyTargetAntennaSelection();
     reportLog("儀表板啟動完成");
   } catch (error) {
     reportLog(error.stack || error.message, "error");
