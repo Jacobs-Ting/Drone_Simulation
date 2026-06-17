@@ -6,6 +6,11 @@ const distanceInput = document.querySelector("#distanceInput");
 const uavHeightInput = document.querySelector("#uavHeightInput");
 const gsHeightInput = document.querySelector("#gsHeightInput");
 const multipathModelInput = document.querySelector("#multipathModelInput");
+const windSpeedInput = document.querySelector("#windSpeedInput");
+const windDirectionInput = document.querySelector("#windDirectionInput");
+const windSpeedOutput = document.querySelector("#windSpeedOutput");
+const windDirectionOutput = document.querySelector("#windDirectionOutput");
+const gustInput = document.querySelector("#gustInput");
 const interfererEnabledInput = document.querySelector("#interfererEnabledInput");
 const interfererDistanceInput = document.querySelector("#interfererDistanceInput");
 const interfererPowerInput = document.querySelector("#interfererPowerInput");
@@ -34,6 +39,12 @@ const chartSubtitle = document.querySelector("#chartSubtitle");
 const chartModeButtons = document.querySelectorAll("[data-chart-mode]");
 
 const SPEED_OF_LIGHT = 3e8;
+const TIME_SERIES_WINDOW_MS = 10000;
+const GUST_JITTER_AMPLITUDES = {
+  none: 0,
+  light: 2,
+  severe: 8
+};
 
 const ANTENNA_TARGETS = {
   tail: {
@@ -152,6 +163,42 @@ function clampedNumberFromInput(input, fallback, min, max) {
   const value = Number(input?.value);
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
+}
+
+function getWindState() {
+  const windSpeed = clampedNumberFromInput(windSpeedInput, 0, 0, 20);
+  const windDirection = clampedNumberFromInput(windDirectionInput, 0, 0, 360);
+  const gustMode = GUST_JITTER_AMPLITUDES[gustInput?.value] === undefined ? "none" : gustInput.value;
+  const baseWindTilt = windSpeed * 1.5;
+  const directionRadians = windDirection * (Math.PI / 180);
+  return {
+    windSpeed,
+    windDirection,
+    gustMode,
+    baseWindTilt,
+    windPitch: baseWindTilt * Math.cos(directionRadians),
+    windRoll: baseWindTilt * Math.sin(directionRadians),
+    jitterAmplitude: GUST_JITTER_AMPLITUDES[gustMode]
+  };
+}
+
+function calculateAerodynamicPose(userPitchDegrees) {
+  const wind = getWindState();
+  const pitchJitter = wind.jitterAmplitude ? (Math.random() * 2 - 1) * wind.jitterAmplitude : 0;
+  const rollJitter = wind.jitterAmplitude ? (Math.random() * 2 - 1) * wind.jitterAmplitude : 0;
+  return {
+    ...wind,
+    userPitchDegrees,
+    pitchJitter,
+    rollJitter,
+    effectivePitchDegrees: userPitchDegrees + wind.windPitch + pitchJitter,
+    effectiveRollDegrees: wind.windRoll + rollJitter
+  };
+}
+
+function updateWindOutputs(windState) {
+  if (windSpeedOutput) windSpeedOutput.textContent = windState.windSpeed.toFixed(1);
+  if (windDirectionOutput) windDirectionOutput.textContent = `${windState.windDirection.toFixed(0)}°`;
 }
 
 function calculateFspl(distanceKm, frequencyMHz) {
@@ -360,6 +407,22 @@ function createThreeScene(onDroneRotationChange = () => {}) {
   scene.add(grid);
   reportLog("地面網格已建立");
 
+  const windArrowOrigin = new THREE.Vector3(-3.1, 1.72, 0);
+  const windArrow = new THREE.ArrowHelper(
+    new THREE.Vector3(1, 0, 0),
+    windArrowOrigin,
+    0.75,
+    0x27d9ff,
+    0.24,
+    0.16
+  );
+  windArrow.cone.material.transparent = true;
+  windArrow.cone.material.opacity = 0.78;
+  windArrow.line.material.transparent = true;
+  windArrow.line.material.opacity = 0.58;
+  scene.add(windArrow);
+  reportLog("風向與風速箭頭已建立");
+
   const groundMat = new THREE.MeshStandardMaterial({ color: 0xe3fbff, emissive: 0x15323a, metalness: 0.35, roughness: 0.35 });
   const groundAntenna = createCylinderBetween(groundAntennaBottom, groundAntennaTop, 0.035, groundMat);
   scene.add(groundAntenna);
@@ -536,6 +599,7 @@ function createThreeScene(onDroneRotationChange = () => {}) {
   let activeAntennaKey = selectedAntennaTarget;
   let latestThetaDegrees = 0;
   let currentPitchDegrees = 0;
+  let currentRollDegrees = 0;
   let currentUavHeightMeters = 50;
   let uavYaw = 0;
   let uavTilt = 0;
@@ -547,11 +611,22 @@ function createThreeScene(onDroneRotationChange = () => {}) {
     const normalizedHeight = THREE.MathUtils.clamp((currentUavHeightMeters - 1) / 499, 0, 1);
     uavGroup.position.y = -0.2 + normalizedHeight * 1.15;
     uavGroup.rotation.set(
-      uavTilt,
+      uavTilt + THREE.MathUtils.degToRad(currentRollDegrees),
       uavYaw,
       THREE.MathUtils.degToRad(-currentPitchDegrees),
       "YXZ"
     );
+  }
+
+  function updateWindArrow(windState = getWindState()) {
+    const directionRadians = THREE.MathUtils.degToRad(windState.windDirection);
+    const direction = new THREE.Vector3(Math.cos(directionRadians), Math.sin(directionRadians), 0).normalize();
+    const length = 0.35 + windState.windSpeed * 0.075;
+    windArrow.setDirection(direction);
+    windArrow.setLength(length, 0.18 + windState.windSpeed * 0.012, 0.1 + windState.windSpeed * 0.006);
+    const opacity = windState.windSpeed <= 0 ? 0.22 : 0.58 + Math.min(windState.windSpeed / 20, 1) * 0.3;
+    windArrow.line.material.opacity = opacity;
+    windArrow.cone.material.opacity = Math.min(opacity + 0.16, 0.92);
   }
 
   function makeThetaArc(basePoint, direction, thetaDegrees) {
@@ -627,9 +702,23 @@ function createThreeScene(onDroneRotationChange = () => {}) {
     );
   }
 
-  function updatePitch(pitchDegrees, uavHeightMeters = currentUavHeightMeters) {
+  function disposeGuideGroup() {
+    guideGroup.children.forEach((child) => {
+      child.geometry?.dispose();
+      if (Array.isArray(child.material)) {
+        child.material.forEach((material) => material.dispose?.());
+      } else {
+        child.material?.dispose?.();
+      }
+    });
+    guideGroup.clear();
+  }
+
+  function updatePitch(pitchDegrees, uavHeightMeters = currentUavHeightMeters, rollDegrees = 0, windState = getWindState()) {
     currentPitchDegrees = pitchDegrees;
+    currentRollDegrees = rollDegrees;
     currentUavHeightMeters = uavHeightMeters;
+    updateWindArrow(windState);
     applyUavRotation();
     uavGroup.updateMatrixWorld(true);
 
@@ -642,7 +731,7 @@ function createThreeScene(onDroneRotationChange = () => {}) {
     const thetaDegrees = THREE.MathUtils.radToDeg(Math.acos(dot));
     latestThetaDegrees = thetaDegrees;
 
-    guideGroup.clear();
+    disposeGuideGroup();
     guideGroup.add(createDashedLine([groundAntennaBottom.clone(), groundAntennaTop.clone().addScaledVector(worldUp, 0.95)], 0xe3fbff));
     guideGroup.add(
       createDashedLine(
@@ -665,7 +754,7 @@ function createThreeScene(onDroneRotationChange = () => {}) {
   function setTargetAntenna(targetKey, uavHeightMeters = currentUavHeightMeters) {
     activeAntennaKey = antennaTargets[targetKey] ? targetKey : "tail";
     applyAntennaFocus();
-    return updatePitch(currentPitchDegrees, uavHeightMeters);
+    return updatePitch(currentPitchDegrees, uavHeightMeters, currentRollDegrees);
   }
 
   function updateDroneFromPointer(event) {
@@ -677,7 +766,7 @@ function createThreeScene(onDroneRotationChange = () => {}) {
 
     uavYaw += dx * 0.01;
     uavTilt = THREE.MathUtils.clamp(uavTilt + dy * 0.008, -0.72, 0.72);
-    const thetaDegrees = updatePitch(currentPitchDegrees);
+    const thetaDegrees = updatePitch(currentPitchDegrees, currentUavHeightMeters, currentRollDegrees);
     onDroneRotationChange(thetaDegrees);
   }
 
@@ -817,6 +906,8 @@ function createLossCurveChart() {
   const thresholdPath = chart.append("path").attr("class", "threshold-line");
   let activeTargetKey = selectedAntennaTarget;
   let latestState = null;
+  const timeSeriesData = [];
+  let lastPitchChartLogKey = "";
 
   function makeCurveData(targetKey) {
     return d3.range(0, 91).map((pitch) => ({
@@ -855,7 +946,11 @@ function createLossCurveChart() {
       .attr("x", x(pitchDegrees))
       .attr("y", y(loss) - 14)
       .text(`${loss.toFixed(2)} dB`);
-    reportLog("D3 損耗曲線已繪製", "ok", `${ANTENNA_TARGETS[targetKey]?.name || "目標天線"}，${data.length} 個資料點`);
+    const chartLogKey = `${targetKey}:${data.length}`;
+    if (chartLogKey !== lastPitchChartLogKey) {
+      reportLog("D3 損耗曲線已繪製", "ok", `${ANTENNA_TARGETS[targetKey]?.name || "目標天線"}，${data.length} 個資料點`);
+      lastPitchChartLogKey = chartLogKey;
+    }
   }
 
   function makeDistanceData(state, forcedModel) {
@@ -918,9 +1013,54 @@ function createLossCurveChart() {
       .text(`${state.rxLevelDbm.toFixed(1)} dBm`);
   }
 
+  function drawTimeMode(state) {
+    if (!state) return;
+    const now = state.timestampMs || performance.now();
+    const oldest = now - TIME_SERIES_WINDOW_MS;
+    while (timeSeriesData.length && timeSeriesData[0].timestampMs < oldest) {
+      timeSeriesData.shift();
+    }
+
+    const x = d3.scaleLinear().domain([-10, 0]).range([0, innerWidth]);
+    const y = d3.scaleLinear().domain([-100, -70]).range([innerHeight, 0]).clamp(true);
+    const line = d3
+      .line()
+      .x((d) => x((d.timestampMs - now) / 1000))
+      .y((d) => y(d.rxLevelDbm))
+      .curve(d3.curveLinear);
+
+    yGrid.call(d3.axisLeft(y).ticks(6).tickSize(-innerWidth).tickFormat("")).select(".domain").remove();
+    xGrid.call(d3.axisBottom(x).ticks(6).tickSize(-innerHeight).tickFormat("")).select(".domain").remove();
+    xAxis.call(d3.axisBottom(x).ticks(6).tickFormat((d) => `${d}s`));
+    yAxis.call(d3.axisLeft(y).ticks(6).tickFormat((d) => `${d} dBm`));
+    xLabel.text("時間序列即時監控");
+    yLabel.text("接收功率 Rx Level (dBm)");
+    if (chartSubtitle) chartSubtitle.textContent = "過去 10 秒 Rx Level 與底噪門檻";
+
+    path.datum(timeSeriesData).attr("d", timeSeriesData.length > 1 ? line : null);
+    referencePath.attr("d", null);
+    thresholdPath
+      .datum([
+        { timeOffsetSeconds: -10, requiredBySnrDbm: state.requiredBySnrDbm },
+        { timeOffsetSeconds: 0, requiredBySnrDbm: state.requiredBySnrDbm }
+      ])
+      .attr("d", d3.line()
+        .x((d) => x(d.timeOffsetSeconds))
+        .y((d) => y(d.requiredBySnrDbm))
+        .curve(d3.curveLinear));
+
+    dot.attr("cx", x(0)).attr("cy", y(state.rxLevelDbm));
+    dotLabel
+      .attr("x", x(0))
+      .attr("y", y(state.rxLevelDbm) - 14)
+      .text(`${state.rxLevelDbm.toFixed(1)} dBm`);
+  }
+
   function redraw(state = latestState) {
     latestState = state || latestState;
-    if (activeChartMode === "distance") {
+    if (activeChartMode === "time") {
+      drawTimeMode(latestState);
+    } else if (activeChartMode === "distance") {
       drawDistanceMode(latestState);
     } else {
       drawPitchMode(activeTargetKey, latestState);
@@ -932,6 +1072,16 @@ function createLossCurveChart() {
   redraw();
 
   function update(state) {
+    if (state?.timestampMs) {
+      timeSeriesData.push({
+        timestampMs: state.timestampMs,
+        rxLevelDbm: state.rxLevelDbm
+      });
+      const oldest = state.timestampMs - TIME_SERIES_WINDOW_MS;
+      while (timeSeriesData.length && timeSeriesData[0].timestampMs < oldest) {
+        timeSeriesData.shift();
+      }
+    }
     redraw(state);
   }
 
@@ -941,7 +1091,7 @@ function createLossCurveChart() {
   }
 
   function setMode(mode) {
-    activeChartMode = mode === "distance" ? "distance" : "pitch";
+    activeChartMode = mode === "time" ? "time" : mode === "distance" ? "distance" : "pitch";
     redraw();
   }
 
@@ -957,16 +1107,25 @@ function applyTargetAntennaSelection() {
   const target = ANTENNA_TARGETS[selectedAntennaTarget] || ANTENNA_TARGETS.tail;
   const uavHeightMeters = clampedNumberFromInput(uavHeightInput, 50, 1, 500);
   frequencyInput.value = target.frequencyMHz;
-  const thetaDegrees = threeScene?.setTargetAntenna(selectedAntennaTarget, uavHeightMeters);
+  threeScene?.setTargetAntenna(selectedAntennaTarget, uavHeightMeters);
   chart?.setTargetAntenna(selectedAntennaTarget);
-  updateDashboard(thetaDegrees);
+  updateDashboard();
   reportLog("分析天線已切換", "ok", `${target.name}，頻率=${target.frequencyMHz} MHz`);
 }
 
-function updateDashboard(thetaFromScene) {
+function updateDashboard(thetaFromScene, options = {}) {
   const pitchDegrees = Number(slider.value);
+  const aerodynamicPose = calculateAerodynamicPose(pitchDegrees);
+  updateWindOutputs(aerodynamicPose);
   const uavHeightMeters = clampedNumberFromInput(uavHeightInput, 50, 1, 500);
-  const thetaDegrees = typeof thetaFromScene === "number" ? thetaFromScene : threeScene.updatePitch(pitchDegrees, uavHeightMeters);
+  const thetaDegrees = typeof thetaFromScene === "number"
+    ? thetaFromScene
+    : threeScene.updatePitch(
+      aerodynamicPose.effectivePitchDegrees,
+      uavHeightMeters,
+      aerodynamicPose.effectiveRollDegrees,
+      aerodynamicPose
+    );
   const polarizationLoss = clampLoss(thetaDegrees);
   const distanceKm = positiveNumberFromInput(distanceInput, 1);
   const gsHeightMeters = clampedNumberFromInput(gsHeightInput, 1.5, 0.5, 20);
@@ -1010,7 +1169,7 @@ function updateDashboard(thetaFromScene) {
   const totalAttenuation = budget.pathLossDb + Math.abs(polarizationLoss);
 
   sliderValue.textContent = `${pitchDegrees}°`;
-  currentPitch.textContent = `${pitchDegrees} 度`;
+  currentPitch.textContent = `${aerodynamicPose.effectivePitchDegrees.toFixed(1)} 度`;
   currentTheta.textContent = `${thetaDegrees.toFixed(1)} 度`;
   currentLoss.textContent = `${polarizationLoss.toFixed(2)} dB`;
   currentFspl.textContent = `${budget.pathLossDb.toFixed(2)} dB`;
@@ -1024,6 +1183,16 @@ function updateDashboard(thetaFromScene) {
   if (chart) {
     chart.update({
       pitchDegrees,
+      effectivePitchDegrees: aerodynamicPose.effectivePitchDegrees,
+      effectiveRollDegrees: aerodynamicPose.effectiveRollDegrees,
+      windSpeed: aerodynamicPose.windSpeed,
+      windDirection: aerodynamicPose.windDirection,
+      windPitch: aerodynamicPose.windPitch,
+      windRoll: aerodynamicPose.windRoll,
+      pitchJitter: aerodynamicPose.pitchJitter,
+      rollJitter: aerodynamicPose.rollJitter,
+      gustMode: aerodynamicPose.gustMode,
+      timestampMs: options.timestampMs || performance.now(),
       thetaDegrees,
       distanceKm,
       frequencyMHz,
@@ -1068,10 +1237,13 @@ function updateDashboard(thetaFromScene) {
     budget.twoRayGainDb.toFixed(2),
     budget.totalNoiseDbm.toFixed(2),
     budget.interferenceRxDbm === null ? "off" : budget.interferenceRxDbm.toFixed(2),
+    aerodynamicPose.windSpeed.toFixed(1),
+    aerodynamicPose.windDirection.toFixed(0),
+    aerodynamicPose.gustMode,
     budget.isControllable
   ].join("|");
 
-  if (signature !== lastLoggedSignature) {
+  if (!options.skipLog && signature !== lastLoggedSignature) {
     reportLog(
       "鏈路預算已更新",
       budget.isControllable ? "ok" : "warn",
@@ -1095,14 +1267,14 @@ async function boot() {
       throw new Error("D3.js 未載入，請確認瀏覽器可以連線到 CDN。");
     }
 
-    threeScene = createThreeScene((thetaDegrees) => updateDashboard(thetaDegrees));
+    threeScene = createThreeScene(() => updateDashboard());
     chart = createLossCurveChart();
     targetAntennaInputs.forEach((input) => {
       input.addEventListener("change", applyTargetAntennaSelection);
     });
     chartModeButtons.forEach((button) => {
       button.addEventListener("click", () => {
-        activeChartMode = button.dataset.chartMode === "distance" ? "distance" : "pitch";
+        activeChartMode = button.dataset.chartMode === "time" ? "time" : button.dataset.chartMode === "distance" ? "distance" : "pitch";
         chartModeButtons.forEach((modeButton) => modeButton.classList.toggle("active", modeButton === button));
         chart?.setMode(activeChartMode);
         updateDashboard();
@@ -1114,6 +1286,9 @@ async function boot() {
       uavHeightInput,
       gsHeightInput,
       multipathModelInput,
+      windSpeedInput,
+      windDirectionInput,
+      gustInput,
       interfererEnabledInput,
       interfererDistanceInput,
       interfererPowerInput,
@@ -1130,6 +1305,11 @@ async function boot() {
       input.addEventListener("change", () => updateDashboard());
     });
     applyTargetAntennaSelection();
+    function monitorFrame(timestampMs) {
+      updateDashboard(undefined, { skipLog: true, timestampMs });
+      requestAnimationFrame(monitorFrame);
+    }
+    requestAnimationFrame(monitorFrame);
     reportLog("儀表板啟動完成");
   } catch (error) {
     reportLog(error.stack || error.message, "error");

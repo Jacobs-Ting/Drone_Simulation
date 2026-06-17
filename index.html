@@ -146,6 +146,38 @@
           </div>
 
           <div class="control-card">
+            <h3>空氣動力環境</h3>
+            <div class="control-grid">
+              <label for="windSpeedInput" class="slider-field">
+                <span>環境風速 (m/s)</span>
+                <div class="slider-row">
+                  <span>0</span>
+                  <input id="windSpeedInput" type="range" min="0" max="20" value="0" step="0.1">
+                  <output id="windSpeedOutput">0.0</output>
+                </div>
+              </label>
+              <label for="windDirectionInput" class="slider-field">
+                <span>風向 (度)</span>
+                <div class="slider-row">
+                  <span>0°</span>
+                  <input id="windDirectionInput" type="range" min="0" max="360" value="0" step="1">
+                  <output id="windDirectionOutput">0°</output>
+                </div>
+              </label>
+              <label for="gustInput">
+                <span>陣風與亂流強度</span>
+                <div class="number-field">
+                  <select id="gustInput">
+                    <option value="none" selected>無 (None)</option>
+                    <option value="light">輕微 (Light)</option>
+                    <option value="severe">強烈 (Severe)</option>
+                  </select>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div class="control-card">
             <h3>收發機硬體配置</h3>
             <div class="hardware-section">
               <h4>地面站 Tx</h4>
@@ -254,6 +286,7 @@
             <div class="chart-mode-switch" aria-label="圖表 X 軸模式">
               <button type="button" class="active" data-chart-mode="pitch">X 軸：俯仰角</button>
               <button type="button" data-chart-mode="distance">X 軸：距離</button>
+              <button type="button" data-chart-mode="time">X 軸：時間 (即時監控)</button>
             </div>
           </div>
           <div id="lossCurveChart" class="chart-host"></div>

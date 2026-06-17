@@ -482,7 +482,7 @@ h2 {
 
 .chart-mode-switch {
   display: inline-grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr minmax(128px, 1.35fr);
   gap: 4px;
   padding: 4px;
   border: 1px solid rgba(98, 153, 169, 0.28);
@@ -516,6 +516,15 @@ h2 {
   color: var(--muted);
   font-size: 0.8rem;
   white-space: nowrap;
+}
+
+.slider-row output {
+  min-width: 3.8em;
+  color: var(--cyan);
+  font-size: 0.82rem;
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 input[type="range"] {
