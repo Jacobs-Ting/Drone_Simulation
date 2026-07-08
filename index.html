@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>無人機RF鏈路模擬分析 - 3D 互動升級版</title>
-  <link rel="stylesheet" href="styles.css?v=20260610-jammer-uav-distance1">
+  <link rel="stylesheet" href="styles.css?v=20260709-hide-diagnostics1">
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 </head>
@@ -27,8 +27,59 @@
           <h2 id="scene-title">3D 互動視覺化區</h2>
           <span>滑鼠拖曳只旋轉無人機，地面站天線固定</span>
         </div>
+        <div id="monitor-container" class="monitor-container">
+          <section id="video-monitor-view" class="video-monitor mode-excellent" aria-labelledby="video-monitor-title">
+            <div class="video-monitor-bezel">
+              <canvas id="videoFeedCanvas" width="1280" height="720" aria-label="即時模擬無人機圖傳畫面"></canvas>
+              <div class="video-scanlines" aria-hidden="true"></div>
+              <div class="video-osd" aria-live="polite">
+                <div class="video-osd-top">
+                  <span id="videoLinkStatus">LINK: EXCELLENT | 1080P | 20MHz</span>
+                  <span class="record-indicator"><i></i> LIVE</span>
+                </div>
+                <div class="video-reticle" aria-hidden="true"><span></span></div>
+                <div class="video-osd-bottom">
+                  <span id="videoSnrValue">SNR +00.0 dB</span>
+                  <strong id="video-monitor-title">VIDEO FEED MONITOR</strong>
+                  <span id="videoRxValue">RX -00.0 dBm</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="c2-telemetry-view" class="c2-telemetry-view" aria-labelledby="c2-telemetry-title" aria-live="polite">
+            <div class="c2-terminal-grid" aria-hidden="true"></div>
+            <header class="c2-terminal-header">
+              <div>
+                <p>C2 COMMAND / TELEMETRY TERMINAL</p>
+                <h3 id="c2-telemetry-title">上行遙測指令面板</h3>
+              </div>
+              <span>ENCRYPTED RF CHANNEL</span>
+            </header>
+            <div class="c2-terminal-body">
+              <div class="c2-status-row">
+                <span>LINK AUTH</span>
+                <strong id="c2UplinkStatus">UPLINK STATUS: SECURED</strong>
+              </div>
+              <div class="c2-heartbeat" aria-label="心跳封包傳輸中">
+                <span>[ TX ]</span><i></i><b>HEARTBEAT</b><i></i><span>[ RX ]</span>
+              </div>
+              <div class="c2-pdr-block">
+                <div><span>PACKET DELIVERY RATIO</span><strong id="c2PdrValue">PDR: 99.9%</strong></div>
+                <div class="c2-progress" role="progressbar" aria-label="封包傳輸率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="99.9">
+                  <span id="c2PdrBar"></span>
+                </div>
+              </div>
+              <div class="c2-readouts">
+                <span id="c2SnrValue">RX SNR: +00.0 dB</span>
+                <span id="c2MarginValue">LINK MARGIN: +00.0 dB</span>
+                <span id="c2RxValue">RX POWER: -00.0 dBm</span>
+              </div>
+            </div>
+          </section>
+        </div>
         <div id="threeScene" class="scene-host"></div>
-        <section class="debug-log" aria-labelledby="debug-log-title">
+        <section class="debug-log" aria-labelledby="debug-log-title" hidden aria-hidden="true">
           <div class="debug-log-header">
             <h3 id="debug-log-title">啟動診斷 Log</h3>
             <span id="debugStatus">等待啟動</span>
@@ -88,6 +139,19 @@
 
           <div class="control-card">
             <h3>全局與姿態控制</h3>
+            <fieldset class="target-switch direction-switch" aria-labelledby="link-direction-title">
+              <legend id="link-direction-title">分析鏈路方向 (Link Direction)</legend>
+              <div class="target-options">
+                <label>
+                  <input type="radio" name="linkDirection" value="uplink">
+                  <span>上行（遙控 C2：地面站 → 無人機）</span>
+                </label>
+                <label>
+                  <input type="radio" name="linkDirection" value="downlink" checked>
+                  <span>下行（圖傳 Video：無人機 → 地面站）</span>
+                </label>
+              </div>
+            </fieldset>
             <fieldset class="target-switch" aria-labelledby="target-antenna-title">
               <legend id="target-antenna-title">選擇分析天線 (Target Antenna)</legend>
               <div class="target-options">
@@ -179,68 +243,96 @@
 
           <div class="control-card">
             <h3>收發機硬體配置</h3>
-            <div class="hardware-section">
-              <h4>地面站 Tx</h4>
-              <div class="control-grid two-column">
-                <label for="frequencyInput">
-                  <span>訊號頻率</span>
-                  <div class="number-field">
-                    <input id="frequencyInput" type="number" min="0.001" step="1" value="433">
-                    <span>MHz</span>
-                  </div>
-                </label>
-                <label for="txPowerInput">
-                  <span>地面站 Tx Power</span>
-                  <div class="number-field">
-                    <input id="txPowerInput" type="number" step="1" value="30">
-                    <span>dBm</span>
-                  </div>
-                </label>
-                <label for="txGainInput">
-                  <span>地面站天線 Peak gain</span>
-                  <div class="number-field">
-                    <input id="txGainInput" type="number" step="0.1" value="2.15">
-                    <span>dBi</span>
-                  </div>
-                </label>
+            <label for="frequencyInput" class="hardware-frequency">
+              <span>共用訊號頻率</span>
+              <div class="number-field">
+                <input id="frequencyInput" type="number" min="0.001" step="1" value="433">
+                <span>MHz</span>
               </div>
-            </div>
+            </label>
 
-            <div class="hardware-section">
-              <h4>無人機 Rx</h4>
-              <div class="control-grid two-column">
-                <label for="rxGainInput">
-                  <span>無人機天線 Peak gain</span>
-                  <div class="number-field">
-                    <input id="rxGainInput" type="number" step="0.1" value="2.15">
-                    <span>dBi</span>
-                  </div>
-                </label>
-                <label for="noiseFigureInput">
-                  <span>無人機內部 NF</span>
-                  <div class="number-field">
-                    <input id="noiseFigureInput" type="number" min="0" step="0.1" value="6">
-                    <span>dB</span>
-                  </div>
-                </label>
-                <label for="bandwidthInput">
-                  <span>接收訊號頻寬</span>
-                  <div class="number-field">
-                    <input id="bandwidthInput" type="number" min="0.001" step="1" value="125">
-                    <select id="bandwidthUnitInput" aria-label="接收訊號頻寬單位">
-                      <option value="kHz" selected>kHz</option>
-                      <option value="MHz">MHz</option>
-                    </select>
-                  </div>
-                </label>
-                <label for="snrInput">
-                  <span>接收端 SNR 門檻</span>
-                  <div class="number-field">
-                    <input id="snrInput" type="number" step="0.1" value="10">
-                    <span>dB</span>
-                  </div>
-                </label>
-              </div>
+            <div class="hardware-pair">
+              <section class="hardware-section" aria-labelledby="gcs-hardware-title">
+                <h4 id="gcs-hardware-title">地面站 (Ground Station)</h4>
+                <div class="control-grid">
+                  <label for="gcsTxPowerInput">
+                    <span>Tx Power</span>
+                    <div class="number-field">
+                      <input id="gcsTxPowerInput" type="number" step="1" value="30">
+                      <span>dBm</span>
+                    </div>
+                  </label>
+                  <label for="gcsAntennaGainInput">
+                    <span>天線 Peak Gain（Tx/Rx 共用）</span>
+                    <div class="number-field">
+                      <input id="gcsAntennaGainInput" type="number" step="0.1" value="2.15">
+                      <span>dBi</span>
+                    </div>
+                  </label>
+                  <label for="gcsNoiseFigureInput">
+                    <span>內部 NF</span>
+                    <div class="number-field">
+                      <input id="gcsNoiseFigureInput" type="number" min="0" step="0.1" value="4">
+                      <span>dB</span>
+                    </div>
+                  </label>
+                  <label for="gcsBandwidthInput">
+                    <span>接收訊號頻寬</span>
+                    <div class="number-field">
+                      <input id="gcsBandwidthInput" type="number" min="0.001" step="1" value="20">
+                      <span>MHz</span>
+                    </div>
+                  </label>
+                  <label for="gcsSnrInput">
+                    <span>接收端 SNR 門檻</span>
+                    <div class="number-field">
+                      <input id="gcsSnrInput" type="number" step="0.1" value="10">
+                      <span>dB</span>
+                    </div>
+                  </label>
+                </div>
+              </section>
+
+              <section class="hardware-section" aria-labelledby="uav-hardware-title">
+                <h4 id="uav-hardware-title">無人機 (UAV)</h4>
+                <div class="control-grid">
+                  <label for="uavTxPowerInput">
+                    <span>Tx Power</span>
+                    <div class="number-field">
+                      <input id="uavTxPowerInput" type="number" step="1" value="23">
+                      <span>dBm</span>
+                    </div>
+                  </label>
+                  <label for="uavAntennaGainInput">
+                    <span>天線 Peak Gain</span>
+                    <div class="number-field">
+                      <input id="uavAntennaGainInput" type="number" step="0.1" value="2.15">
+                      <span>dBi</span>
+                    </div>
+                  </label>
+                  <label for="uavNoiseFigureInput">
+                    <span>內部 NF</span>
+                    <div class="number-field">
+                      <input id="uavNoiseFigureInput" type="number" min="0" step="0.1" value="6">
+                      <span>dB</span>
+                    </div>
+                  </label>
+                  <label for="uavBandwidthInput">
+                    <span>接收訊號頻寬</span>
+                    <div class="number-field">
+                      <input id="uavBandwidthInput" type="number" min="0.001" step="0.001" value="0.125">
+                      <span>MHz</span>
+                    </div>
+                  </label>
+                  <label for="uavSnrInput">
+                    <span>接收端 SNR 門檻</span>
+                    <div class="number-field">
+                      <input id="uavSnrInput" type="number" step="0.1" value="10">
+                      <span>dB</span>
+                    </div>
+                  </label>
+                </div>
+              </section>
             </div>
           </div>
 
@@ -295,6 +387,6 @@
     </section>
   </main>
 
-  <script defer src="script.js?v=20260610-jammer-uav-distance1"></script>
+  <script defer src="script.js?v=20260709-hide-diagnostics1"></script>
 </body>
 </html>

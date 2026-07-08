@@ -1,4 +1,5 @@
 const d3 = window.d3;
+const DIAGNOSTIC_LOG_ENABLED = false;
 const targetAntennaInputs = document.querySelectorAll('input[name="targetAntenna"]');
 const slider = document.querySelector("#pitchSlider");
 const sliderValue = document.querySelector("#sliderValue");
@@ -16,13 +17,17 @@ const interfererDistanceInput = document.querySelector("#interfererDistanceInput
 const interfererPowerInput = document.querySelector("#interfererPowerInput");
 const interfererUavDistanceOutput = document.querySelector("#interfererUavDistanceOutput");
 const frequencyInput = document.querySelector("#frequencyInput");
-const txPowerInput = document.querySelector("#txPowerInput");
-const txGainInput = document.querySelector("#txGainInput");
-const rxGainInput = document.querySelector("#rxGainInput");
-const noiseFigureInput = document.querySelector("#noiseFigureInput");
-const bandwidthInput = document.querySelector("#bandwidthInput");
-const bandwidthUnitInput = document.querySelector("#bandwidthUnitInput");
-const snrInput = document.querySelector("#snrInput");
+const linkDirectionInputs = document.querySelectorAll('input[name="linkDirection"]');
+const gcsTxPowerInput = document.querySelector("#gcsTxPowerInput");
+const gcsAntennaGainInput = document.querySelector("#gcsAntennaGainInput");
+const gcsNoiseFigureInput = document.querySelector("#gcsNoiseFigureInput");
+const gcsBandwidthInput = document.querySelector("#gcsBandwidthInput");
+const gcsSnrInput = document.querySelector("#gcsSnrInput");
+const uavTxPowerInput = document.querySelector("#uavTxPowerInput");
+const uavAntennaGainInput = document.querySelector("#uavAntennaGainInput");
+const uavNoiseFigureInput = document.querySelector("#uavNoiseFigureInput");
+const uavBandwidthInput = document.querySelector("#uavBandwidthInput");
+const uavSnrInput = document.querySelector("#uavSnrInput");
 const currentPitch = document.querySelector("#currentPitch");
 const currentTheta = document.querySelector("#currentTheta");
 const currentLoss = document.querySelector("#currentLoss");
@@ -37,6 +42,19 @@ const debugLog = document.querySelector("#debugLog");
 const debugStatus = document.querySelector("#debugStatus");
 const chartSubtitle = document.querySelector("#chartSubtitle");
 const chartModeButtons = document.querySelectorAll("[data-chart-mode]");
+const videoMonitorView = document.querySelector("#video-monitor-view");
+const c2TelemetryView = document.querySelector("#c2-telemetry-view");
+const videoFeedCanvas = document.querySelector("#videoFeedCanvas");
+const videoLinkStatus = document.querySelector("#videoLinkStatus");
+const videoSnrValue = document.querySelector("#videoSnrValue");
+const videoRxValue = document.querySelector("#videoRxValue");
+const c2UplinkStatus = document.querySelector("#c2UplinkStatus");
+const c2PdrValue = document.querySelector("#c2PdrValue");
+const c2PdrBar = document.querySelector("#c2PdrBar");
+const c2PdrProgress = document.querySelector(".c2-progress");
+const c2SnrValue = document.querySelector("#c2SnrValue");
+const c2MarginValue = document.querySelector("#c2MarginValue");
+const c2RxValue = document.querySelector("#c2RxValue");
 
 const SPEED_OF_LIGHT = 3e8;
 const TIME_SERIES_WINDOW_MS = 10000;
@@ -61,6 +79,153 @@ const ANTENNA_TARGETS = {
 
 let selectedAntennaTarget = "tail";
 let activeChartMode = "pitch";
+let videoFeed;
+
+const AMC_OSD_CONFIG = {
+  excellent: {
+    link: "LINK: EXCELLENT | 1080P | 20MHz",
+    phy: "PHY: MCS 7 | 64-QAM | CR: 3/4",
+    color: "#00ff00"
+  },
+  fair: {
+    link: "LINK: FAIR | 720P | 10MHz",
+    phy: "PHY: MCS 4 | 16-QAM | CR: 1/2",
+    color: "#ffff00"
+  },
+  poor: {
+    link: "LINK: POOR | 480P | 5MHz",
+    phy: "PHY: MCS 1 | QPSK | CR: 1/3",
+    color: "#ff8800"
+  },
+  lost: {
+    link: "CRITICAL: NO SIGNAL",
+    phy: "SYNC LOST",
+    color: "#ff0000"
+  }
+};
+
+function createVideoFeedMonitor() {
+  if (!videoFeedCanvas || !videoMonitorView) return null;
+  const ctx = videoFeedCanvas.getContext("2d", { alpha: false });
+  const osdLayer = videoMonitorView.querySelector(".video-osd");
+  const videoPhyStatus = document.createElement("span");
+  const source = new Image();
+  const pixelCanvas = document.createElement("canvas");
+  const pixelCtx = pixelCanvas.getContext("2d", { alpha: false });
+  const noiseCanvas = document.createElement("canvas");
+  const noiseCtx = noiseCanvas.getContext("2d", { alpha: false });
+  let mode = "excellent";
+  let imageReady = false;
+  let lastNoiseFrame = 0;
+
+  videoPhyStatus.id = "videoPhyStatus";
+  videoPhyStatus.textContent = AMC_OSD_CONFIG.excellent.phy;
+  videoPhyStatus.style.cssText = [
+    "position:absolute",
+    "top:clamp(34px,7vw,62px)",
+    "left:clamp(10px,2vw,20px)",
+    "padding:5px 8px",
+    "border-left:2px solid currentColor",
+    "background:rgba(0,0,0,.48)",
+    "box-shadow:0 1px 6px rgba(0,0,0,.5)",
+    "text-shadow:1px 1px 4px #000"
+  ].join(";");
+  osdLayer?.appendChild(videoPhyStatus);
+
+  videoLinkStatus.style.padding = "5px 8px";
+  videoLinkStatus.style.borderLeft = "2px solid currentColor";
+  videoLinkStatus.style.background = "rgba(0,0,0,.48)";
+  videoLinkStatus.style.boxShadow = "0 1px 6px rgba(0,0,0,.5)";
+  videoLinkStatus.style.textShadow = "1px 1px 4px #000";
+
+  source.onload = () => { imageReady = true; };
+  source.onerror = () => reportLog("圖傳底圖載入失敗", "warn", source.src);
+  source.src = "assets/drone-aerial-feed.png";
+
+  function drawCover(targetCtx, image, width, height) {
+    const scale = Math.max(width / image.width, height / image.height);
+    const sw = width / scale;
+    const sh = height / scale;
+    targetCtx.drawImage(image, (image.width - sw) / 2, (image.height - sh) / 2, sw, sh, 0, 0, width, height);
+  }
+
+  function drawStatic(width, height) {
+    const nw = 320;
+    const nh = Math.round(nw * height / width);
+    if (noiseCanvas.width !== nw || noiseCanvas.height !== nh) {
+      noiseCanvas.width = nw;
+      noiseCanvas.height = nh;
+    }
+    const imageData = noiseCtx.createImageData(nw, nh);
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      const value = Math.random() * 255;
+      imageData.data[i] = value;
+      imageData.data[i + 1] = value;
+      imageData.data[i + 2] = value;
+      imageData.data[i + 3] = 255;
+    }
+    noiseCtx.putImageData(imageData, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(noiseCanvas, 0, 0, width, height);
+    if (Math.random() > 0.55) {
+      ctx.fillStyle = "rgba(255,255,255,.35)";
+      ctx.fillRect(0, Math.random() * height, width, 2 + Math.random() * 5);
+    }
+  }
+
+  function render(timestamp = performance.now()) {
+    const width = videoFeedCanvas.width;
+    const height = videoFeedCanvas.height;
+    if (mode === "lost") {
+      if (timestamp - lastNoiseFrame > 42) {
+        drawStatic(width, height);
+        lastNoiseFrame = timestamp;
+      }
+      return;
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.fillStyle = "#071217";
+    ctx.fillRect(0, 0, width, height);
+    if (!imageReady) return;
+    if (mode === "poor") {
+      const pixelWidth = Math.round(width * 0.15);
+      const pixelHeight = Math.round(height * 0.15);
+      if (pixelCanvas.width !== pixelWidth || pixelCanvas.height !== pixelHeight) {
+        pixelCanvas.width = pixelWidth;
+        pixelCanvas.height = pixelHeight;
+      }
+      pixelCtx.imageSmoothingEnabled = true;
+      drawCover(pixelCtx, source, pixelCanvas.width, pixelCanvas.height);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(pixelCanvas, 0, 0, width, height);
+      ctx.globalAlpha = 0.15;
+      for (let i = 0; i < 360; i += 1) {
+        const shade = Math.random() > 0.5 ? 255 : 0;
+        ctx.fillStyle = `rgb(${shade} ${shade} ${shade})`;
+        ctx.fillRect(Math.random() * width, Math.random() * height, 2 + Math.random() * 7, 2 + Math.random() * 7);
+      }
+      ctx.globalAlpha = 1;
+    } else {
+      drawCover(ctx, source, width, height);
+    }
+  }
+
+  function update(budget, requiredSnrDb) {
+    const receivedSnrDb = budget.rxLevelDbm - budget.totalNoiseDbm;
+    const marginDb = receivedSnrDb - requiredSnrDb;
+    mode = marginDb < 0 ? "lost" : marginDb < 4 ? "poor" : marginDb < 12 ? "fair" : "excellent";
+    const osd = AMC_OSD_CONFIG[mode];
+    videoMonitorView.className = `video-monitor mode-${mode}`;
+    videoMonitorView.style.setProperty("--osd-color", osd.color);
+    videoLinkStatus.textContent = osd.link;
+    videoPhyStatus.textContent = osd.phy;
+    videoSnrValue.textContent = `SNR ${receivedSnrDb >= 0 ? "+" : ""}${receivedSnrDb.toFixed(1)} dB`;
+    videoRxValue.textContent = `RX ${budget.rxLevelDbm.toFixed(1)} dBm`;
+    render();
+  }
+
+  return { update, render };
+}
 
 function normalizeVector(vector) {
   const length = Math.hypot(vector.x, vector.y, vector.z) || 1;
@@ -74,6 +239,49 @@ function normalizeVector(vector) {
 function getSelectedAntennaTarget() {
   const checked = document.querySelector('input[name="targetAntenna"]:checked');
   return ANTENNA_TARGETS[checked?.value] ? checked.value : "tail";
+}
+
+function getLinkDirection() {
+  return document.querySelector('input[name="linkDirection"]:checked')?.value === "uplink"
+    ? "uplink"
+    : "downlink";
+}
+
+function updateMonitorView(linkDirection) {
+  const isDownlink = linkDirection === "downlink";
+  if (videoMonitorView) videoMonitorView.style.display = isDownlink ? "block" : "none";
+  if (c2TelemetryView) c2TelemetryView.style.display = isDownlink ? "none" : "block";
+}
+
+function updateC2Telemetry(budget, requiredSnrDb) {
+  if (!c2TelemetryView) return;
+  const receivedSnrDb = budget.rxLevelDbm - budget.totalNoiseDbm;
+  const marginDb = receivedSnrDb - requiredSnrDb;
+  const state = marginDb < 0 ? "lost" : marginDb < 4 ? "marginal" : "secured";
+  const statusText = {
+    secured: "UPLINK STATUS: SECURED",
+    marginal: "UPLINK STATUS: MARGINAL",
+    lost: "UPLINK STATUS: LINK LOST"
+  }[state];
+  let pdr;
+  if (marginDb >= 12) {
+    pdr = 99.9;
+  } else if (marginDb >= 4) {
+    pdr = 92 + ((marginDb - 4) / 8) * 7.9;
+  } else if (marginDb >= 0) {
+    pdr = 45 + (marginDb / 4) * 47;
+  } else {
+    pdr = Math.max(0, 45 + marginDb * 5);
+  }
+
+  c2TelemetryView.className = `c2-telemetry-view c2-${state}`;
+  c2UplinkStatus.textContent = statusText;
+  c2PdrValue.textContent = `PDR: ${pdr.toFixed(1)}%`;
+  c2PdrBar.style.width = `${pdr}%`;
+  c2PdrProgress?.setAttribute("aria-valuenow", pdr.toFixed(1));
+  c2SnrValue.textContent = `RX SNR: ${receivedSnrDb >= 0 ? "+" : ""}${receivedSnrDb.toFixed(1)} dB`;
+  c2MarginValue.textContent = `LINK MARGIN: ${marginDb >= 0 ? "+" : ""}${marginDb.toFixed(1)} dB`;
+  c2RxValue.textContent = `RX POWER: ${budget.rxLevelDbm.toFixed(1)} dBm`;
 }
 
 function rotateLocalVectorForPitch(vector, pitchDegrees) {
@@ -95,6 +303,14 @@ function calculateTargetTheta(targetKey, pitchDegrees) {
 }
 
 function reportLog(message, level = "ok", detail = "") {
+  if (!DIAGNOSTIC_LOG_ENABLED) {
+    if (level === "error") {
+      const text = `${message}${detail ? `：${detail}` : ""}`;
+      console.error(`[UAV Polarization] ${text}`);
+    }
+    return;
+  }
+
   const time = new Date().toLocaleTimeString("zh-TW", { hour12: false });
   const text = `[${time}] ${message}${detail ? `：${detail}` : ""}`;
   const method = level === "error" ? "error" : level === "warn" ? "warn" : "log";
@@ -906,6 +1122,7 @@ function createLossCurveChart() {
   const thresholdPath = chart.append("path").attr("class", "threshold-line");
   let activeTargetKey = selectedAntennaTarget;
   let latestState = null;
+  let activeLinkDirection = null;
   const timeSeriesData = [];
   let lastPitchChartLogKey = "";
 
@@ -1072,6 +1289,10 @@ function createLossCurveChart() {
   redraw();
 
   function update(state) {
+    if (state?.linkDirection && activeLinkDirection !== state.linkDirection) {
+      timeSeriesData.length = 0;
+      activeLinkDirection = state.linkDirection;
+    }
     if (state?.timestampMs) {
       timeSeriesData.push({
         timestampMs: state.timestampMs,
@@ -1135,13 +1356,48 @@ function updateDashboard(thetaFromScene, options = {}) {
   const interfererPowerDbm = numberFromInput(interfererPowerInput, 30);
   const interfererUavDistanceMeters = calculateInterfererUavDistanceMeters(distanceKm, uavHeightMeters, interfererDistanceMeters);
   const frequencyMHz = positiveNumberFromInput(frequencyInput, 433);
-  const txPowerDbm = numberFromInput(txPowerInput, 30);
-  const txGainDbi = numberFromInput(txGainInput, 0);
-  const rxGainDbi = numberFromInput(rxGainInput, 0);
-  const noiseFigureDb = nonNegativeNumberFromInput(noiseFigureInput, 6);
-  const bandwidth = positiveNumberFromInput(bandwidthInput, 125);
-  const bandwidthUnit = bandwidthUnitInput?.value === "MHz" ? "MHz" : "kHz";
-  const snrDb = numberFromInput(snrInput, 0);
+  const linkDirection = getLinkDirection();
+  const gcsTxPower = numberFromInput(gcsTxPowerInput, 30);
+  const gcsAntennaGain = numberFromInput(gcsAntennaGainInput, 2.15);
+  const gcsNF = nonNegativeNumberFromInput(gcsNoiseFigureInput, 4);
+  const gcsBW = positiveNumberFromInput(gcsBandwidthInput, 20);
+  const gcsSNRThreshold = numberFromInput(gcsSnrInput, 10);
+  const uavTxPower = numberFromInput(uavTxPowerInput, 23);
+  const uavAntennaGain = numberFromInput(uavAntennaGainInput, 2.15);
+  const uavNF = nonNegativeNumberFromInput(uavNoiseFigureInput, 6);
+  const uavBW = positiveNumberFromInput(uavBandwidthInput, 0.125);
+  const uavSNRThreshold = numberFromInput(uavSnrInput, 10);
+
+  let currentTxPower;
+  let currentTxGain;
+  let currentRxGain;
+  let currentRxNF;
+  let currentRxBW;
+  let currentRxSNR;
+
+  if (linkDirection === "downlink") {
+    currentTxPower = uavTxPower;
+    currentTxGain = uavAntennaGain;
+    currentRxGain = gcsAntennaGain;
+    currentRxNF = gcsNF;
+    currentRxBW = gcsBW;
+    currentRxSNR = gcsSNRThreshold;
+  } else {
+    currentTxPower = gcsTxPower;
+    currentTxGain = gcsAntennaGain;
+    currentRxGain = uavAntennaGain;
+    currentRxNF = uavNF;
+    currentRxBW = uavBW;
+    currentRxSNR = uavSNRThreshold;
+  }
+
+  const txPowerDbm = currentTxPower;
+  const txGainDbi = currentTxGain;
+  const rxGainDbi = currentRxGain;
+  const noiseFigureDb = currentRxNF;
+  const bandwidth = currentRxBW;
+  const bandwidthUnit = "MHz";
+  const snrDb = currentRxSNR;
   const budget = calculateLinkBudget({
     distanceKm,
     frequencyMHz,
@@ -1177,9 +1433,17 @@ function updateDashboard(thetaFromScene, options = {}) {
   currentRxLevel.textContent = `${budget.rxLevelDbm.toFixed(2)} dBm`;
   currentRequiredSignal.textContent = `${budget.requiredBySnrDbm.toFixed(2)} dBm`;
   currentLinkMargin.textContent = `${budget.linkMarginDb.toFixed(2)} dB`;
-  currentLinkState.textContent = budget.isControllable ? "無人機可控" : "無人機失控";
+  currentLinkState.textContent = linkDirection === "downlink"
+    ? (budget.isControllable ? "圖傳鏈路正常" : "圖傳鏈路中斷")
+    : (budget.isControllable ? "無人機可控" : "無人機失控");
   linkStateCard.classList.toggle("controlled", budget.isControllable);
   linkStateCard.classList.toggle("lost", !budget.isControllable);
+  updateMonitorView(linkDirection);
+  if (linkDirection === "downlink") {
+    videoFeed?.update(budget, snrDb);
+  } else {
+    updateC2Telemetry(budget, snrDb);
+  }
   if (chart) {
     chart.update({
       pitchDegrees,
@@ -1193,6 +1457,7 @@ function updateDashboard(thetaFromScene, options = {}) {
       rollJitter: aerodynamicPose.rollJitter,
       gustMode: aerodynamicPose.gustMode,
       timestampMs: options.timestampMs || performance.now(),
+      linkDirection,
       thetaDegrees,
       distanceKm,
       frequencyMHz,
@@ -1217,6 +1482,7 @@ function updateDashboard(thetaFromScene, options = {}) {
   const signature = [
     pitchDegrees,
     selectedAntennaTarget,
+    linkDirection,
     thetaDegrees.toFixed(1),
     distanceKm,
     uavHeightMeters,
@@ -1233,6 +1499,16 @@ function updateDashboard(thetaFromScene, options = {}) {
     bandwidth,
     bandwidthUnit,
     snrDb,
+    gcsTxPower,
+    gcsAntennaGain,
+    gcsNF,
+    gcsBW,
+    gcsSNRThreshold,
+    uavTxPower,
+    uavAntennaGain,
+    uavNF,
+    uavBW,
+    uavSNRThreshold,
     budget.pathLossDb.toFixed(2),
     budget.twoRayGainDb.toFixed(2),
     budget.totalNoiseDbm.toFixed(2),
@@ -1247,7 +1523,7 @@ function updateDashboard(thetaFromScene, options = {}) {
     reportLog(
       "鏈路預算已更新",
       budget.isControllable ? "ok" : "warn",
-      `target=${ANTENNA_TARGETS[selectedAntennaTarget].name}, model=${multipathModel}, pathLoss=${budget.pathLossDb.toFixed(2)} dB, twoRayGain=${budget.twoRayGainDb.toFixed(2)} dB, noise=${budget.totalNoiseDbm.toFixed(2)} dBm, interference=${budget.interferenceRxDbm === null ? "off" : `${budget.interferenceRxDbm.toFixed(2)} dBm`}, Rx=${budget.rxLevelDbm.toFixed(2)} dBm, threshold=${budget.requiredBySnrDbm.toFixed(2)} dBm, margin=${budget.linkMarginDb.toFixed(2)} dB, state=${currentLinkState.textContent}`
+      `direction=${linkDirection}, target=${ANTENNA_TARGETS[selectedAntennaTarget].name}, model=${multipathModel}, pathLoss=${budget.pathLossDb.toFixed(2)} dB, twoRayGain=${budget.twoRayGainDb.toFixed(2)} dB, noise=${budget.totalNoiseDbm.toFixed(2)} dBm, interference=${budget.interferenceRxDbm === null ? "off" : `${budget.interferenceRxDbm.toFixed(2)} dBm`}, Rx=${budget.rxLevelDbm.toFixed(2)} dBm, threshold=${budget.requiredBySnrDbm.toFixed(2)} dBm, margin=${budget.linkMarginDb.toFixed(2)} dB, state=${currentLinkState.textContent}`
     );
     lastLoggedSignature = signature;
   }
@@ -1269,8 +1545,15 @@ async function boot() {
 
     threeScene = createThreeScene(() => updateDashboard());
     chart = createLossCurveChart();
+    videoFeed = createVideoFeedMonitor();
     targetAntennaInputs.forEach((input) => {
       input.addEventListener("change", applyTargetAntennaSelection);
+    });
+    linkDirectionInputs.forEach((input) => {
+      input.addEventListener("change", () => {
+        updateMonitorView(getLinkDirection());
+        updateDashboard();
+      });
     });
     chartModeButtons.forEach((button) => {
       button.addEventListener("click", () => {
@@ -1293,13 +1576,16 @@ async function boot() {
       interfererDistanceInput,
       interfererPowerInput,
       frequencyInput,
-      txPowerInput,
-      txGainInput,
-      rxGainInput,
-      noiseFigureInput,
-      bandwidthInput,
-      bandwidthUnitInput,
-      snrInput
+      gcsTxPowerInput,
+      gcsAntennaGainInput,
+      gcsNoiseFigureInput,
+      gcsBandwidthInput,
+      gcsSnrInput,
+      uavTxPowerInput,
+      uavAntennaGainInput,
+      uavNoiseFigureInput,
+      uavBandwidthInput,
+      uavSnrInput
     ].forEach((input) => {
       input.addEventListener("input", () => updateDashboard());
       input.addEventListener("change", () => updateDashboard());
