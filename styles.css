@@ -627,6 +627,67 @@ h2 {
   font-size: 0.82rem;
 }
 
+.spread-spectrum-section {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid rgba(39, 217, 255, 0.24);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(39, 217, 255, 0.12), transparent 14rem),
+    rgba(5, 14, 18, 0.42);
+}
+
+.spread-spectrum-section .card-title-row {
+  margin-bottom: 0;
+}
+
+.spread-spectrum-section h4 {
+  margin-bottom: 5px;
+  color: var(--cyan);
+}
+
+.spread-spectrum-section p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.spread-rate-control {
+  padding-top: 2px;
+}
+
+.spread-spectrum-readouts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid rgba(71, 240, 166, 0.28);
+  border-radius: 7px;
+  background: rgba(71, 240, 166, 0.07);
+}
+
+.spread-spectrum-readouts span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.spread-spectrum-readouts strong {
+  color: var(--green);
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 12px rgba(71, 240, 166, 0.28);
+}
+
+.spread-spectrum-note {
+  padding-top: 10px;
+  border-top: 1px dashed rgba(138, 166, 176, 0.22);
+}
+
 .hardware-pair {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>無人機RF鏈路模擬分析 - 3D 互動升級版</title>
-  <link rel="stylesheet" href="styles.css?v=20260709-right-drawer1">
+  <link rel="stylesheet" href="styles.css?v=20260709-spread-spectrum-ui1">
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 </head>
@@ -288,6 +288,37 @@
               </div>
             </label>
 
+            <section class="spread-spectrum-section" aria-labelledby="spread-spectrum-title">
+              <div class="card-title-row">
+                <div>
+                  <h4 id="spread-spectrum-title">展頻抗干擾模式 (Spread Spectrum)</h4>
+                  <p>降低 Data Rate 可提升處理增益 Gp，但會壓縮圖傳可用畫質。</p>
+                </div>
+                <label class="toggle-field compact-toggle" for="spreadSpectrumInput">
+                  <span>啟用</span>
+                  <div class="toggle-row">
+                    <input id="spreadSpectrumInput" type="checkbox">
+                    <span class="toggle-track" aria-hidden="true"></span>
+                  </div>
+                </label>
+              </div>
+              <label for="dataRateInput" class="slider-field spread-rate-control">
+                <span>展頻 Data Rate</span>
+                <div class="slider-row">
+                  <span>10 kbps</span>
+                  <input id="dataRateInput" type="range" min="10" max="12000" value="10" step="10" data-unit="kbps">
+                  <output id="dataRateOutput">10 kbps</output>
+                </div>
+              </label>
+              <div class="spread-spectrum-readouts">
+                <span>Processing Gain Gp</span>
+                <strong id="processingGainOutput">0.0 dB</strong>
+              </div>
+              <p class="spread-spectrum-note">
+                速率門檻：1080P ≥ 8000 kbps、720P ≥ 3000 kbps、480P ≥ 1000 kbps；低於 1000 kbps 時強制切換為 DATA ONLY。
+              </p>
+            </section>
+
             <div class="hardware-pair">
               <section class="hardware-section" aria-labelledby="gcs-hardware-title">
                 <h4 id="gcs-hardware-title">地面站 (Ground Station)</h4>
@@ -416,6 +447,6 @@
     </details>
   </main>
 
-  <script defer src="script.js?v=20260709-right-drawer1"></script>
+  <script defer src="script.js?v=20260709-data-rate-10kbps1"></script>
 </body>
 </html>

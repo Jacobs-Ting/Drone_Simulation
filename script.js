@@ -56,9 +56,18 @@ const c2SnrValue = document.querySelector("#c2SnrValue");
 const c2MarginValue = document.querySelector("#c2MarginValue");
 const c2RxValue = document.querySelector("#c2RxValue");
 const exportCsvButton = document.querySelector("#exportCsvButton");
+const spreadSpectrumInput = document.querySelector("#spreadSpectrumInput, #spreadSpectrumEnabledInput, #spreadSpectrumToggle");
+const dataRateInput = document.querySelector("#dataRateInput, #dataRateSlider, #dataRateKbpsInput");
+const dataRateOutput = document.querySelector("#dataRateOutput");
+const processingGainOutput = document.querySelector("#processingGainOutput, #spreadGainOutput, #gpOutput");
 
 const SPEED_OF_LIGHT = 3e8;
 const TIME_SERIES_WINDOW_MS = 10000;
+const VIDEO_RATE_LIMITS_KBPS = {
+  excellent: 8000,
+  fair: 3000,
+  poor: 1000
+};
 const GUST_JITTER_AMPLITUDES = {
   none: 0,
   light: 2,
@@ -98,12 +107,71 @@ const AMC_OSD_CONFIG = {
     phy: "PHY: MCS 1 | QPSK | CR: 1/3",
     color: "#ff8800"
   },
+  telemetry: {
+    link: "LINK: SECURED | DATA ONLY | LOW RATE",
+    phy: "PHY: DSSS | TELEMETRY | VIDEO DISABLED",
+    color: "#35d7ff"
+  },
   lost: {
     link: "CRITICAL: NO SIGNAL",
     phy: "SYNC LOST",
     color: "#ff0000"
   }
 };
+
+function isSpreadSpectrumEnabled() {
+  if (!spreadSpectrumInput) return false;
+  if (spreadSpectrumInput.type === "checkbox" || spreadSpectrumInput.type === "radio") {
+    return Boolean(spreadSpectrumInput.checked);
+  }
+  return ["true", "on", "enabled", "1", "yes"].includes(String(spreadSpectrumInput.value).toLowerCase());
+}
+
+function getSpreadSpectrumDataRateKbps() {
+  if (!dataRateInput) return Infinity;
+  const rawValue = Number(dataRateInput.value);
+  if (!Number.isFinite(rawValue) || rawValue <= 0) return Infinity;
+  const unit = (dataRateInput.dataset.unit || dataRateInput.dataset.rateUnit || "kbps").toLowerCase();
+  return unit === "mbps" ? rawValue * 1000 : rawValue;
+}
+
+function getProcessingGainDb(dataRateKbps, spreadBandwidthMHz = 0) {
+  const spreadBandwidthHz = Math.max(spreadBandwidthMHz, 0) * 1e6;
+  const dataRateHz = Math.max(dataRateKbps * 1000, 1);
+  return Math.max(0, 10 * Math.log10(spreadBandwidthHz / dataRateHz));
+}
+
+function getVideoTransportState(spreadBandwidthMHz = 0) {
+  const spreadEnabled = isSpreadSpectrumEnabled();
+  const dataRateKbps = getSpreadSpectrumDataRateKbps();
+  const processingGainDb = spreadEnabled && Number.isFinite(dataRateKbps)
+    ? getProcessingGainDb(dataRateKbps, spreadBandwidthMHz)
+    : 0;
+  if (dataRateOutput && Number.isFinite(dataRateKbps)) {
+    dataRateOutput.textContent = `${dataRateKbps.toFixed(0)} kbps`;
+  }
+  if (processingGainOutput && Number.isFinite(processingGainDb)) {
+    processingGainOutput.textContent = `${processingGainDb.toFixed(1)} dB`;
+  }
+  return {
+    spreadEnabled,
+    dataRateKbps,
+    spreadBandwidthMHz,
+    processingGainDb
+  };
+}
+
+function chooseVideoModeBySnrAndRate(marginDb, transport) {
+  if (marginDb < 0) return "lost";
+  if (!transport.spreadEnabled) {
+    return marginDb < 4 ? "poor" : marginDb < 12 ? "fair" : "excellent";
+  }
+  const rate = transport.dataRateKbps;
+  if (rate < VIDEO_RATE_LIMITS_KBPS.poor) return "telemetry";
+  if (marginDb >= 12 && rate >= VIDEO_RATE_LIMITS_KBPS.excellent) return "excellent";
+  if (marginDb >= 4 && rate >= VIDEO_RATE_LIMITS_KBPS.fair) return "fair";
+  return "poor";
+}
 
 function createVideoFeedMonitor() {
   if (!videoFeedCanvas || !videoMonitorView) return null;
@@ -118,6 +186,7 @@ function createVideoFeedMonitor() {
   let mode = "excellent";
   let imageReady = false;
   let lastNoiseFrame = 0;
+  let currentTransport = getVideoTransportState();
 
   videoPhyStatus.id = "videoPhyStatus";
   videoPhyStatus.textContent = AMC_OSD_CONFIG.excellent.phy;
@@ -174,6 +243,87 @@ function createVideoFeedMonitor() {
     }
   }
 
+  function drawTelemetry(width, height, timestamp) {
+    const t = timestamp / 1000;
+    ctx.imageSmoothingEnabled = true;
+    ctx.fillStyle = "#020a10";
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(53, 215, 255, 0.18)";
+    ctx.lineWidth = 1;
+    const grid = 64;
+    for (let x = 0; x <= width; x += grid) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= height; y += grid) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+
+    const cx = width * 0.5;
+    const cy = height * 0.48;
+    const radius = Math.min(width, height) * 0.26;
+    ctx.strokeStyle = "rgba(53, 215, 255, 0.62)";
+    ctx.lineWidth = 2;
+    for (let i = 1; i <= 4; i += 1) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, (radius * i) / 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(cx - radius, cy);
+    ctx.lineTo(cx + radius, cy);
+    ctx.moveTo(cx, cy - radius);
+    ctx.lineTo(cx, cy + radius);
+    ctx.stroke();
+
+    const sweep = t * 1.8;
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+    gradient.addColorStop(0, "rgba(53, 215, 255, 0.44)");
+    gradient.addColorStop(1, "rgba(53, 215, 255, 0)");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, sweep - 0.32, sweep);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(53, 215, 255, 0.95)";
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(sweep) * radius, cy + Math.sin(sweep) * radius);
+    ctx.stroke();
+
+    const horizonY = cy + Math.sin(t * 0.9) * 12;
+    ctx.strokeStyle = "rgba(71, 240, 166, 0.72)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(width * 0.18, horizonY);
+    ctx.lineTo(width * 0.32, horizonY);
+    ctx.moveTo(width * 0.68, horizonY);
+    ctx.lineTo(width * 0.82, horizonY);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(0, 0, 0, 0.46)";
+    ctx.fillRect(width * 0.08, height * 0.68, width * 0.84, height * 0.2);
+    ctx.fillStyle = "#35d7ff";
+    ctx.font = `700 ${Math.max(20, width * 0.025)}px ui-monospace, Menlo, Consolas, monospace`;
+    const transport = currentTransport;
+    const rateText = Number.isFinite(transport.dataRateKbps) ? `${transport.dataRateKbps.toFixed(0)} kbps` : "N/A";
+    const gpText = Number.isFinite(transport.processingGainDb) ? `${transport.processingGainDb.toFixed(1)} dB` : "N/A";
+    const lat = (25.033 + Math.sin(t * 0.13) * 0.002).toFixed(5);
+    const lon = (121.565 + Math.cos(t * 0.11) * 0.002).toFixed(5);
+    ctx.fillText("VIDEO PAYLOAD: DISABLED BY SHANNON/RATE LIMIT", width * 0.1, height * 0.73);
+    ctx.fillText(`GPS ${lat}N ${lon}E  ALT ${(118 + Math.sin(t) * 4).toFixed(1)}m`, width * 0.1, height * 0.79);
+    ctx.fillText(`DSSS DATA RATE ${rateText}  PROCESSING GAIN ${gpText}`, width * 0.1, height * 0.85);
+    ctx.restore();
+  }
+
   function render(timestamp = performance.now()) {
     const width = videoFeedCanvas.width;
     const height = videoFeedCanvas.height;
@@ -182,6 +332,10 @@ function createVideoFeedMonitor() {
         drawStatic(width, height);
         lastNoiseFrame = timestamp;
       }
+      return;
+    }
+    if (mode === "telemetry") {
+      drawTelemetry(width, height, timestamp);
       return;
     }
     ctx.imageSmoothingEnabled = true;
@@ -211,18 +365,28 @@ function createVideoFeedMonitor() {
     }
   }
 
-  function update(budget, requiredSnrDb) {
+  function update(budget, requiredSnrDb, transportState = getVideoTransportState()) {
     const receivedSnrDb = budget.rxLevelDbm - budget.totalNoiseDbm;
     const marginDb = receivedSnrDb - requiredSnrDb;
-    mode = marginDb < 0 ? "lost" : marginDb < 4 ? "poor" : marginDb < 12 ? "fair" : "excellent";
+    const transport = transportState;
+    currentTransport = transport;
+    mode = chooseVideoModeBySnrAndRate(marginDb, transport);
     const osd = AMC_OSD_CONFIG[mode];
     videoMonitorView.className = `video-monitor mode-${mode}`;
     videoMonitorView.style.setProperty("--osd-color", osd.color);
     videoLinkStatus.textContent = osd.link;
     videoPhyStatus.textContent = osd.phy;
     videoSnrValue.textContent = `SNR ${receivedSnrDb >= 0 ? "+" : ""}${receivedSnrDb.toFixed(1)} dB`;
-    videoRxValue.textContent = `RX ${budget.rxLevelDbm.toFixed(1)} dBm`;
+    videoRxValue.textContent = transport.spreadEnabled && Number.isFinite(transport.dataRateKbps)
+      ? `RX ${budget.rxLevelDbm.toFixed(1)} dBm | DR ${transport.dataRateKbps.toFixed(0)} kbps | Gp ${transport.processingGainDb.toFixed(1)} dB`
+      : `RX ${budget.rxLevelDbm.toFixed(1)} dBm`;
     render();
+    return {
+      mode,
+      receivedSnrDb,
+      marginDb,
+      ...transport
+    };
   }
 
   return { update, render };
@@ -254,10 +418,11 @@ function updateMonitorView(linkDirection) {
   if (c2TelemetryView) c2TelemetryView.style.display = isDownlink ? "none" : "block";
 }
 
-function updateC2Telemetry(budget, requiredSnrDb) {
+function updateC2Telemetry(budget, requiredSnrDb, transportState = getVideoTransportState()) {
   if (!c2TelemetryView) return;
   const receivedSnrDb = budget.rxLevelDbm - budget.totalNoiseDbm;
   const marginDb = receivedSnrDb - requiredSnrDb;
+  const processingGainDb = transportState.spreadEnabled ? transportState.processingGainDb : 0;
   const state = marginDb < 0 ? "lost" : marginDb < 4 ? "marginal" : "secured";
   const statusText = {
     secured: "UPLINK STATUS: SECURED",
@@ -280,8 +445,12 @@ function updateC2Telemetry(budget, requiredSnrDb) {
   c2PdrValue.textContent = `PDR: ${pdr.toFixed(1)}%`;
   c2PdrBar.style.width = `${pdr}%`;
   c2PdrProgress?.setAttribute("aria-valuenow", pdr.toFixed(1));
-  c2SnrValue.textContent = `RX SNR: ${receivedSnrDb >= 0 ? "+" : ""}${receivedSnrDb.toFixed(1)} dB`;
-  c2MarginValue.textContent = `LINK MARGIN: ${marginDb >= 0 ? "+" : ""}${marginDb.toFixed(1)} dB`;
+  c2SnrValue.textContent = transportState.spreadEnabled
+    ? `RX SNR: ${receivedSnrDb >= 0 ? "+" : ""}${receivedSnrDb.toFixed(1)} dB | PG: +${processingGainDb.toFixed(1)} dB`
+    : `RX SNR: ${receivedSnrDb >= 0 ? "+" : ""}${receivedSnrDb.toFixed(1)} dB`;
+  c2MarginValue.textContent = transportState.spreadEnabled
+    ? `LINK MARGIN: ${marginDb >= 0 ? "+" : ""}${marginDb.toFixed(1)} dB | EFF REQ SNR: ${requiredSnrDb.toFixed(1)} dB`
+    : `LINK MARGIN: ${marginDb >= 0 ? "+" : ""}${marginDb.toFixed(1)} dB`;
   c2RxValue.textContent = `RX POWER: ${budget.rxLevelDbm.toFixed(1)} dBm`;
 }
 
@@ -578,8 +747,14 @@ function exportCurrentStateCsv() {
     ["鏈路預算", "Total Noise", formatCsvNumber(snapshot.totalNoiseDbm, 2), "dBm"],
     ["鏈路預算", "Required Signal", formatCsvNumber(snapshot.requiredBySnrDbm, 2), "dBm"],
     ["鏈路預算", "Received SNR", formatCsvNumber(snapshot.receivedSnrDb, 2), "dB"],
-    ["鏈路預算", "Required SNR", formatCsvNumber(snapshot.snrDb, 2), "dB"],
+    ["鏈路預算", "Configured SNR Threshold", formatCsvNumber(snapshot.configuredSnrDb, 2), "dB"],
+    ["鏈路預算", "Effective SNR Threshold", formatCsvNumber(snapshot.snrDb, 2), "dB"],
     ["鏈路預算", "Link Margin", formatCsvNumber(snapshot.linkMarginDb, 2), "dB"],
+    ["圖傳/展頻", "Current Video Quality", snapshot.videoQualityMode || "N/A", ""],
+    ["圖傳/展頻", "Spread Spectrum", snapshot.spreadSpectrumEnabled ? "ON" : "OFF", ""],
+    ["圖傳/展頻", "RF Spread Bandwidth", formatCsvNumber(snapshot.spreadBandwidthMHz, 3), "MHz"],
+    ["圖傳/展頻", "Data Rate", Number.isFinite(snapshot.dataRateKbps) ? formatCsvNumber(snapshot.dataRateKbps, 0) : "N/A", "kbps"],
+    ["圖傳/展頻", "Processing Gain", formatCsvNumber(snapshot.processingGainDb, 2), "dB"],
     ["地面站硬體", "GCS Tx Power", formatCsvNumber(snapshot.gcsTxPower, 2), "dBm"],
     ["地面站硬體", "GCS Antenna Gain", formatCsvNumber(snapshot.gcsAntennaGain, 2), "dBi"],
     ["地面站硬體", "GCS Noise Figure", formatCsvNumber(snapshot.gcsNF, 2), "dB"],
@@ -1486,7 +1661,9 @@ function updateDashboard(thetaFromScene, options = {}) {
   const noiseFigureDb = currentRxNF;
   const bandwidth = currentRxBW;
   const bandwidthUnit = "MHz";
-  const snrDb = currentRxSNR;
+  const configuredSnrDb = currentRxSNR;
+  let videoTransportState = getVideoTransportState(bandwidth);
+  const snrDb = configuredSnrDb - videoTransportState.processingGainDb;
   const budget = calculateLinkBudget({
     distanceKm,
     frequencyMHz,
@@ -1529,9 +1706,9 @@ function updateDashboard(thetaFromScene, options = {}) {
   linkStateCard.classList.toggle("lost", !budget.isControllable);
   updateMonitorView(linkDirection);
   if (linkDirection === "downlink") {
-    videoFeed?.update(budget, snrDb);
+    videoTransportState = videoFeed?.update(budget, snrDb, videoTransportState) || videoTransportState;
   } else {
-    updateC2Telemetry(budget, snrDb);
+    updateC2Telemetry(budget, snrDb, videoTransportState);
   }
 
   latestSimulationSnapshot = {
@@ -1554,6 +1731,7 @@ function updateDashboard(thetaFromScene, options = {}) {
     bandwidth,
     bandwidthUnit,
     snrDb,
+    configuredSnrDb,
     gsHeightMeters,
     uavHeightMeters,
     multipathModel,
@@ -1563,6 +1741,11 @@ function updateDashboard(thetaFromScene, options = {}) {
     interfererUavDistanceMeters,
     totalAttenuationDb: totalAttenuation,
     receivedSnrDb: budget.rxLevelDbm - budget.totalNoiseDbm,
+    videoQualityMode: videoTransportState.mode || null,
+    spreadSpectrumEnabled: videoTransportState.spreadEnabled,
+    dataRateKbps: videoTransportState.dataRateKbps,
+    spreadBandwidthMHz: videoTransportState.spreadBandwidthMHz,
+    processingGainDb: videoTransportState.processingGainDb,
     gcsTxPower,
     gcsAntennaGain,
     gcsNF,
@@ -1608,6 +1791,7 @@ function updateDashboard(thetaFromScene, options = {}) {
       bandwidth,
       bandwidthUnit,
       snrDb,
+      configuredSnrDb,
       gsHeightMeters,
       uavHeightMeters,
       multipathModel,
@@ -1727,6 +1911,10 @@ async function boot() {
       uavBandwidthInput,
       uavSnrInput
     ].forEach((input) => {
+      input.addEventListener("input", () => updateDashboard());
+      input.addEventListener("change", () => updateDashboard());
+    });
+    [spreadSpectrumInput, dataRateInput].filter(Boolean).forEach((input) => {
       input.addEventListener("input", () => updateDashboard());
       input.addEventListener("change", () => updateDashboard());
     });
