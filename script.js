@@ -55,6 +55,7 @@ const c2PdrProgress = document.querySelector(".c2-progress");
 const c2SnrValue = document.querySelector("#c2SnrValue");
 const c2MarginValue = document.querySelector("#c2MarginValue");
 const c2RxValue = document.querySelector("#c2RxValue");
+const exportCsvButton = document.querySelector("#exportCsvButton");
 
 const SPEED_OF_LIGHT = 3e8;
 const TIME_SERIES_WINDOW_MS = 10000;
@@ -523,6 +524,93 @@ function calculateLinkBudget({
     linkMarginDb: rxLevelDbm - requiredBySnrDbm,
     isControllable: rxLevelDbm > requiredBySnrDbm
   };
+}
+
+function csvEscape(value) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function formatCsvNumber(value, digits = 2) {
+  return Number.isFinite(value) ? value.toFixed(digits) : "";
+}
+
+function makeTimestampForFilename(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
+  ].join("-") + "_" + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join("");
+}
+
+function exportCurrentStateCsv() {
+  updateDashboard(undefined, { skipLog: true, timestampMs: performance.now() });
+  const snapshot = latestSimulationSnapshot;
+  if (!snapshot) return;
+
+  const rows = [
+    ["分類", "參數", "數值", "單位/備註"],
+    ["匯出資訊", "Export Time", new Date().toISOString(), "ISO 8601"],
+    ["基本狀態", "Link Direction", snapshot.linkDirectionLabel, snapshot.linkDirection],
+    ["基本狀態", "Target Antenna", snapshot.targetAntennaName, snapshot.targetAntenna],
+    ["基本狀態", "Link State", snapshot.linkState, ""],
+    ["姿態/極化", "Pitch Command", formatCsvNumber(snapshot.pitchDegrees, 1), "deg"],
+    ["姿態/極化", "Effective Pitch", formatCsvNumber(snapshot.effectivePitchDegrees, 1), "deg"],
+    ["姿態/極化", "Effective Roll", formatCsvNumber(snapshot.effectiveRollDegrees, 1), "deg"],
+    ["姿態/極化", "Theta", formatCsvNumber(snapshot.thetaDegrees, 2), "deg"],
+    ["姿態/極化", "Polarization Loss", formatCsvNumber(snapshot.polarizationLossDb, 2), "dB"],
+    ["鏈路預算", "Distance", formatCsvNumber(snapshot.distanceKm, 3), "km"],
+    ["鏈路預算", "Frequency", formatCsvNumber(snapshot.frequencyMHz, 3), "MHz"],
+    ["鏈路預算", "Tx Power", formatCsvNumber(snapshot.txPowerDbm, 2), "dBm"],
+    ["鏈路預算", "Tx Antenna Gain", formatCsvNumber(snapshot.txGainDbi, 2), "dBi"],
+    ["鏈路預算", "Rx Antenna Gain", formatCsvNumber(snapshot.rxGainDbi, 2), "dBi"],
+    ["鏈路預算", "Path Loss", formatCsvNumber(snapshot.pathLossDb, 2), "dB"],
+    ["鏈路預算", "Two-Ray Gain", formatCsvNumber(snapshot.twoRayGainDb, 2), "dB"],
+    ["鏈路預算", "Total Attenuation", formatCsvNumber(snapshot.totalAttenuationDb, 2), "dB"],
+    ["鏈路預算", "Rx Power", formatCsvNumber(snapshot.rxLevelDbm, 2), "dBm"],
+    ["鏈路預算", "Noise Floor", formatCsvNumber(snapshot.noiseFloorDbm, 2), "dBm"],
+    ["鏈路預算", "Interference Rx", snapshot.interferenceRxDbm === null ? "OFF" : formatCsvNumber(snapshot.interferenceRxDbm, 2), "dBm"],
+    ["鏈路預算", "Total Noise", formatCsvNumber(snapshot.totalNoiseDbm, 2), "dBm"],
+    ["鏈路預算", "Required Signal", formatCsvNumber(snapshot.requiredBySnrDbm, 2), "dBm"],
+    ["鏈路預算", "Received SNR", formatCsvNumber(snapshot.receivedSnrDb, 2), "dB"],
+    ["鏈路預算", "Required SNR", formatCsvNumber(snapshot.snrDb, 2), "dB"],
+    ["鏈路預算", "Link Margin", formatCsvNumber(snapshot.linkMarginDb, 2), "dB"],
+    ["地面站硬體", "GCS Tx Power", formatCsvNumber(snapshot.gcsTxPower, 2), "dBm"],
+    ["地面站硬體", "GCS Antenna Gain", formatCsvNumber(snapshot.gcsAntennaGain, 2), "dBi"],
+    ["地面站硬體", "GCS Noise Figure", formatCsvNumber(snapshot.gcsNF, 2), "dB"],
+    ["地面站硬體", "GCS RX Bandwidth", formatCsvNumber(snapshot.gcsBW, 3), "MHz"],
+    ["地面站硬體", "GCS SNR Threshold", formatCsvNumber(snapshot.gcsSNRThreshold, 2), "dB"],
+    ["無人機硬體", "UAV Tx Power", formatCsvNumber(snapshot.uavTxPower, 2), "dBm"],
+    ["無人機硬體", "UAV Antenna Gain", formatCsvNumber(snapshot.uavAntennaGain, 2), "dBi"],
+    ["無人機硬體", "UAV Noise Figure", formatCsvNumber(snapshot.uavNF, 2), "dB"],
+    ["無人機硬體", "UAV RX Bandwidth", formatCsvNumber(snapshot.uavBW, 3), "MHz"],
+    ["無人機硬體", "UAV SNR Threshold", formatCsvNumber(snapshot.uavSNRThreshold, 2), "dB"],
+    ["環境", "Multipath Model", snapshot.multipathModel, ""],
+    ["環境", "UAV Height", formatCsvNumber(snapshot.uavHeightMeters, 2), "m"],
+    ["環境", "Ground Station Height", formatCsvNumber(snapshot.gsHeightMeters, 2), "m"],
+    ["環境", "Wind Speed", formatCsvNumber(snapshot.windSpeed, 1), "m/s"],
+    ["環境", "Wind Direction", formatCsvNumber(snapshot.windDirection, 0), "deg"],
+    ["環境", "Gust Mode", snapshot.gustMode, ""],
+    ["干擾源", "Enabled", snapshot.interfererEnabled ? "ON" : "OFF", ""],
+    ["干擾源", "Interferer Distance", formatCsvNumber(snapshot.interfererDistanceMeters, 1), "m"],
+    ["干擾源", "Interferer Tx Power", formatCsvNumber(snapshot.interfererPowerDbm, 2), "dBm"],
+    ["干擾源", "Interferer-UAV Distance", formatCsvNumber(snapshot.interfererUavDistanceMeters, 1), "m"]
+  ];
+  const csv = `\uFEFF${rows.map((row) => row.map(csvEscape).join(",")).join("\r\n")}`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `uav_rf_link_snapshot_${makeTimestampForFilename()}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function createCylinderBetween(start, end, radius, material) {
@@ -1322,6 +1410,7 @@ function createLossCurveChart() {
 let threeScene;
 let chart;
 let lastLoggedSignature = "";
+let latestSimulationSnapshot = null;
 
 function applyTargetAntennaSelection() {
   selectedAntennaTarget = getSelectedAntennaTarget();
@@ -1444,6 +1533,56 @@ function updateDashboard(thetaFromScene, options = {}) {
   } else {
     updateC2Telemetry(budget, snrDb);
   }
+
+  latestSimulationSnapshot = {
+    linkDirection,
+    linkDirectionLabel: linkDirection === "downlink" ? "下行（圖傳 Video：無人機 → 地面站）" : "上行（遙控 C2：地面站 → 無人機）",
+    targetAntenna: selectedAntennaTarget,
+    targetAntennaName: ANTENNA_TARGETS[selectedAntennaTarget]?.name || "未知天線",
+    linkState: currentLinkState.textContent,
+    pitchDegrees,
+    effectivePitchDegrees: aerodynamicPose.effectivePitchDegrees,
+    effectiveRollDegrees: aerodynamicPose.effectiveRollDegrees,
+    thetaDegrees,
+    polarizationLossDb: polarizationLoss,
+    distanceKm,
+    frequencyMHz,
+    txPowerDbm,
+    txGainDbi,
+    rxGainDbi,
+    noiseFigureDb,
+    bandwidth,
+    bandwidthUnit,
+    snrDb,
+    gsHeightMeters,
+    uavHeightMeters,
+    multipathModel,
+    interfererEnabled,
+    interfererDistanceMeters,
+    interfererPowerDbm,
+    interfererUavDistanceMeters,
+    totalAttenuationDb: totalAttenuation,
+    receivedSnrDb: budget.rxLevelDbm - budget.totalNoiseDbm,
+    gcsTxPower,
+    gcsAntennaGain,
+    gcsNF,
+    gcsBW,
+    gcsSNRThreshold,
+    uavTxPower,
+    uavAntennaGain,
+    uavNF,
+    uavBW,
+    uavSNRThreshold,
+    windSpeed: aerodynamicPose.windSpeed,
+    windDirection: aerodynamicPose.windDirection,
+    windPitch: aerodynamicPose.windPitch,
+    windRoll: aerodynamicPose.windRoll,
+    pitchJitter: aerodynamicPose.pitchJitter,
+    rollJitter: aerodynamicPose.rollJitter,
+    gustMode: aerodynamicPose.gustMode,
+    ...budget
+  };
+
   if (chart) {
     chart.update({
       pitchDegrees,
@@ -1563,6 +1702,7 @@ async function boot() {
         updateDashboard();
       });
     });
+    exportCsvButton?.addEventListener("click", exportCurrentStateCsv);
     slider.addEventListener("input", updateDashboard);
     [
       distanceInput,

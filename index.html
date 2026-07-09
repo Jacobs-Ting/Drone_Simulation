@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>無人機RF鏈路模擬分析 - 3D 互動升級版</title>
-  <link rel="stylesheet" href="styles.css?v=20260709-hide-diagnostics1">
+  <link rel="stylesheet" href="styles.css?v=20260709-right-drawer1">
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 </head>
@@ -21,11 +21,31 @@
       </div>
     </header>
 
-    <section class="instrument-layout">
+    <section class="sim-workbench" aria-label="即時操作與監視區">
       <article class="panel scene-panel" aria-labelledby="scene-title">
         <div class="section-heading">
-          <h2 id="scene-title">3D 互動視覺化區</h2>
-          <span>滑鼠拖曳只旋轉無人機，地面站天線固定</span>
+          <div>
+            <h2 id="scene-title">3D 無人機控制區</h2>
+            <span>滑鼠拖曳旋轉無人機，滾輪縮放工作區</span>
+          </div>
+          <span id="sliderValue" class="angle-chip">0°</span>
+        </div>
+        <div id="threeScene" class="scene-host"></div>
+        <section class="debug-log" aria-labelledby="debug-log-title" hidden aria-hidden="true">
+          <div class="debug-log-header">
+            <h3 id="debug-log-title">啟動診斷 Log</h3>
+            <span id="debugStatus">等待啟動</span>
+          </div>
+          <ol id="debugLog" aria-live="polite"></ol>
+        </section>
+      </article>
+
+      <article class="panel monitor-panel" aria-labelledby="monitor-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="monitor-title">即時鏈路監視器</h2>
+            <span>下行顯示圖傳畫質，上行顯示 C2 遙測</span>
+          </div>
         </div>
         <div id="monitor-container" class="monitor-container">
           <section id="video-monitor-view" class="video-monitor mode-excellent" aria-labelledby="video-monitor-title">
@@ -78,63 +98,80 @@
             </div>
           </section>
         </div>
-        <div id="threeScene" class="scene-host"></div>
-        <section class="debug-log" aria-labelledby="debug-log-title" hidden aria-hidden="true">
-          <div class="debug-log-header">
-            <h3 id="debug-log-title">啟動診斷 Log</h3>
-            <span id="debugStatus">等待啟動</span>
-          </div>
-          <ol id="debugLog" aria-live="polite"></ol>
-        </section>
-
-        <section class="panel metrics-panel" aria-labelledby="metrics-title">
-          <div class="section-heading">
-            <h2 id="metrics-title">即時數據面板</h2>
-          </div>
-          <div class="metric">
-            <span>當前無人機俯仰角</span>
-            <strong id="currentPitch">0 度</strong>
-          </div>
-          <div class="metric">
-            <span>計算出的夾角 θ (3D)</span>
-            <strong id="currentTheta">0 度</strong>
-          </div>
-          <div class="metric">
-            <span>極化錯位損耗</span>
-            <strong id="currentLoss">0.00 dB</strong>
-          </div>
-          <div class="metric">
-            <span>路徑損耗 (Path Loss)</span>
-            <strong id="currentFspl">0.00 dB</strong>
-          </div>
-          <div class="metric">
-            <span>總訊號衰減</span>
-            <strong id="currentTotalLoss">0.00 dB</strong>
-          </div>
-          <div class="metric">
-            <span>最終 Rx Level</span>
-            <strong id="currentRxLevel">0.00 dBm</strong>
-          </div>
-          <div class="metric">
-            <span>總底噪 + SNR 門檻</span>
-            <strong id="currentRequiredSignal">0.00 dBm</strong>
-          </div>
-          <div class="metric">
-            <span>Link Margin</span>
-            <strong id="currentLinkMargin">0.00 dB</strong>
-          </div>
-          <div class="metric link-state" id="linkStateCard">
-            <span>鏈路狀態</span>
-            <strong id="currentLinkState">無人機可控</strong>
-          </div>
-        </section>
       </article>
+    </section>
 
-      <aside class="right-panel">
-        <section class="panel control-panel" aria-labelledby="control-title">
+    <section class="dashboard-grid" aria-label="即時儀表板">
+      <section class="panel metrics-panel" aria-labelledby="metrics-title">
+        <div class="section-heading">
+          <h2 id="metrics-title">即時數據面板</h2>
+        </div>
+        <div class="metric">
+          <span>當前無人機俯仰角</span>
+          <strong id="currentPitch">0 度</strong>
+        </div>
+        <div class="metric">
+          <span>計算出的夾角 θ (3D)</span>
+          <strong id="currentTheta">0 度</strong>
+        </div>
+        <div class="metric">
+          <span>極化錯位損耗</span>
+          <strong id="currentLoss">0.00 dB</strong>
+        </div>
+        <div class="metric">
+          <span>路徑損耗 (Path Loss)</span>
+          <strong id="currentFspl">0.00 dB</strong>
+        </div>
+        <div class="metric">
+          <span>總訊號衰減</span>
+          <strong id="currentTotalLoss">0.00 dB</strong>
+        </div>
+        <div class="metric">
+          <span>最終 Rx Level</span>
+          <strong id="currentRxLevel">0.00 dBm</strong>
+        </div>
+        <div class="metric">
+          <span>總底噪 + SNR 門檻</span>
+          <strong id="currentRequiredSignal">0.00 dBm</strong>
+        </div>
+        <div class="metric">
+          <span>Link Margin</span>
+          <strong id="currentLinkMargin">0.00 dB</strong>
+        </div>
+        <div class="metric link-state" id="linkStateCard">
+          <span>鏈路狀態</span>
+          <strong id="currentLinkState">無人機可控</strong>
+        </div>
+      </section>
+
+      <section class="panel chart-panel" aria-labelledby="chart-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="chart-title">數據圖表區</h2>
+            <span id="chartSubtitle">Lpol = 20 × log10(cos θ)</span>
+          </div>
+          <div class="chart-mode-switch" aria-label="圖表 X 軸模式">
+            <button type="button" class="active" data-chart-mode="pitch">X 軸：俯仰角</button>
+            <button type="button" data-chart-mode="distance">X 軸：距離</button>
+            <button type="button" data-chart-mode="time">X 軸：時間 (即時監控)</button>
+          </div>
+        </div>
+        <div id="lossCurveChart" class="chart-host"></div>
+      </section>
+    </section>
+
+    <details class="panel control-panel parameter-drawer">
+      <summary>
+        <span>
+          <strong id="control-title">進階鏈路參數設定</strong>
+          <small>調整姿態、鏈路方向、硬體、環境與干擾參數</small>
+        </span>
+        <b>參數設定</b>
+      </summary>
+      <div class="parameter-drawer-body">
           <div class="section-heading">
-            <h2 id="control-title">控制區</h2>
-            <span id="sliderValue" class="angle-chip">0°</span>
+            <h2>參數設定區</h2>
+            <span>預設收合，需要調參時再展開</span>
           </div>
 
           <div class="control-card">
@@ -367,26 +404,18 @@
               干擾計算距離：<output id="interfererUavDistanceOutput">--</output>
             </p>
           </div>
-        </section>
 
-        <section class="panel chart-panel" aria-labelledby="chart-title">
-          <div class="section-heading">
+          <div class="export-toolbar" aria-label="資料匯出工具">
             <div>
-              <h2 id="chart-title">數據圖表區</h2>
-              <span id="chartSubtitle">Lpol = 20 × log10(cos θ)</span>
+              <h3>資料匯出</h3>
+              <p>將目前畫面的鏈路預算、硬體設定與環境參數匯出為 CSV 快照。</p>
             </div>
-            <div class="chart-mode-switch" aria-label="圖表 X 軸模式">
-              <button type="button" class="active" data-chart-mode="pitch">X 軸：俯仰角</button>
-              <button type="button" data-chart-mode="distance">X 軸：距離</button>
-              <button type="button" data-chart-mode="time">X 軸：時間 (即時監控)</button>
-            </div>
+            <button id="exportCsvButton" class="export-button" type="button">匯出目前狀態 CSV</button>
           </div>
-          <div id="lossCurveChart" class="chart-host"></div>
-        </section>
-      </aside>
-    </section>
+      </div>
+    </details>
   </main>
 
-  <script defer src="script.js?v=20260709-hide-diagnostics1"></script>
+  <script defer src="script.js?v=20260709-right-drawer1"></script>
 </body>
 </html>

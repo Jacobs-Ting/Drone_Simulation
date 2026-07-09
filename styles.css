@@ -110,6 +110,21 @@ h2 {
   align-items: stretch;
 }
 
+.sim-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.92fr);
+  gap: 18px;
+  align-items: stretch;
+  margin-bottom: 18px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
 .right-panel {
   display: grid;
   grid-template-rows: auto minmax(310px, 1fr);
@@ -126,6 +141,7 @@ h2 {
 }
 
 .scene-panel,
+.monitor-panel,
 .control-panel,
 .metrics-panel,
 .chart-panel {
@@ -144,8 +160,8 @@ h2 {
 .scene-host {
   position: relative;
   width: 100%;
-  height: min(62vh, 640px);
-  min-height: 430px;
+  height: clamp(280px, 34vw, 430px);
+  min-height: 280px;
   overflow: hidden;
   border: 1px solid rgba(98, 153, 169, 0.18);
   border-radius: 6px;
@@ -167,7 +183,7 @@ h2 {
 }
 
 .monitor-container {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .monitor-container .video-monitor {
@@ -397,10 +413,149 @@ h2 {
 }
 
 .control-panel {
-  max-height: calc(100vh - 72px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
   scrollbar-color: rgba(98, 153, 169, 0.55) rgba(5, 14, 18, 0.55);
+}
+
+.parameter-drawer {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 30;
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 36px);
+  padding: 0;
+  overflow: hidden;
+  transition: width 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.parameter-drawer > summary {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 64px;
+  padding: 18px;
+  cursor: pointer;
+  list-style: none;
+  background:
+    linear-gradient(180deg, rgba(18, 38, 47, 0.98), rgba(10, 22, 28, 0.98)),
+    var(--panel);
+}
+
+.parameter-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+.parameter-drawer > summary span {
+  display: grid;
+  gap: 4px;
+}
+
+.parameter-drawer > summary strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.parameter-drawer > summary small {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.parameter-drawer > summary b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid rgba(39, 217, 255, 0.36);
+  border-radius: 999px;
+  background: rgba(39, 217, 255, 0.08);
+  color: var(--cyan);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.parameter-drawer[open] > summary {
+  border-bottom: 1px solid rgba(98, 153, 169, 0.18);
+}
+
+.parameter-drawer[open] > summary b {
+  border-color: rgba(71, 240, 166, 0.42);
+  background: rgba(71, 240, 166, 0.1);
+  color: var(--green);
+}
+
+.parameter-drawer[open] > summary b::before {
+  content: "收合設定";
+}
+
+.parameter-drawer[open] > summary b {
+  font-size: 0;
+}
+
+.parameter-drawer[open] > summary b::before {
+  font-size: 0.82rem;
+}
+
+.parameter-drawer-body {
+  max-height: calc(100vh - 118px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 18px;
+  scrollbar-color: rgba(98, 153, 169, 0.55) rgba(5, 14, 18, 0.55);
+}
+
+.parameter-drawer:not([open]) {
+  top: 50%;
+  width: 52px;
+  max-height: none;
+  transform: translateY(-50%);
+  overflow: visible;
+  border-color: rgba(39, 217, 255, 0.44);
+  border-radius: 10px 0 0 10px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42), 0 0 18px rgba(39, 217, 255, 0.14);
+}
+
+.parameter-drawer:not([open]) > summary {
+  justify-content: center;
+  width: 52px;
+  min-height: 156px;
+  padding: 12px 8px;
+  border-radius: 10px 0 0 10px;
+  background: linear-gradient(180deg, rgba(39, 217, 255, 0.16), rgba(71, 240, 166, 0.08)), #071217;
+}
+
+.parameter-drawer:not([open]) > summary span {
+  display: none;
+}
+
+.parameter-drawer:not([open]) > summary b {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cyan);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-orientation: mixed;
+  writing-mode: vertical-rl;
+}
+
+.parameter-drawer:not([open]) > summary b::after {
+  content: "＋";
+  margin-top: 8px;
+  color: var(--green);
+  font-size: 1rem;
+}
+
+.parameter-drawer .control-grid.two-column,
+.parameter-drawer .hardware-pair,
+.parameter-drawer .target-options {
+  grid-template-columns: 1fr;
 }
 
 .control-card {
@@ -812,8 +967,8 @@ input[type="range"] {
 
 .chart-host {
   width: 100%;
-  height: 300px;
-  min-height: 300px;
+  height: 320px;
+  min-height: 320px;
 }
 
 .load-message {
@@ -837,11 +992,10 @@ input[type="range"] {
   display: none !important;
 }
 
-.scene-panel .metrics-panel {
+.metrics-panel {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 0 14px;
-  margin-top: 18px;
 }
 
 .metrics-panel .section-heading {
@@ -860,6 +1014,54 @@ input[type="range"] {
 
 .metrics-panel .link-state {
   grid-column: span 2;
+}
+
+.export-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid rgba(71, 240, 166, 0.28);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 0 0, rgba(71, 240, 166, 0.12), transparent 22rem),
+    rgba(5, 14, 18, 0.46);
+}
+
+.export-toolbar h3 {
+  margin: 0 0 6px;
+  color: var(--green);
+  font-size: 0.92rem;
+}
+
+.export-toolbar p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.export-button {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid rgba(71, 240, 166, 0.56);
+  border-radius: 7px;
+  background: linear-gradient(180deg, rgba(71, 240, 166, 0.2), rgba(71, 240, 166, 0.08));
+  color: var(--green);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 780;
+  cursor: pointer;
+  box-shadow: 0 0 18px rgba(71, 240, 166, 0.12);
+}
+
+.export-button:hover,
+.export-button:focus-visible {
+  outline: none;
+  border-color: rgba(39, 217, 255, 0.68);
+  color: var(--cyan);
+  box-shadow: 0 0 22px rgba(39, 217, 255, 0.18);
 }
 
 .debug-log-header {
@@ -964,7 +1166,8 @@ svg {
 }
 
 @media (max-width: 1040px) {
-  .instrument-layout {
+  .instrument-layout,
+  .sim-workbench {
     grid-template-columns: 1fr;
   }
 
@@ -974,8 +1177,8 @@ svg {
   }
 
   .scene-host {
-    height: 58vh;
-    min-height: 420px;
+    height: 46vh;
+    min-height: 340px;
   }
 }
 
@@ -994,8 +1197,15 @@ svg {
     flex-direction: column;
   }
 
+  .parameter-drawer > summary,
+  .export-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .chart-mode-switch {
     width: 100%;
+    grid-template-columns: 1fr;
   }
 
   .control-grid.two-column {
@@ -1016,7 +1226,7 @@ svg {
   }
 
   .scene-host {
-    min-height: 360px;
+    min-height: 300px;
   }
 
   .video-osd-bottom strong { display: none; }
