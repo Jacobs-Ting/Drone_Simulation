@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>無人機RF鏈路模擬分析 - 3D 互動升級版</title>
-  <link rel="stylesheet" href="styles.css?v=20260709-spread-spectrum-ui1">
+  <link rel="stylesheet" href="styles.css?v=20260714-ai-autonomy-status">
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 </head>
@@ -140,7 +140,8 @@
         </div>
         <div class="metric link-state" id="linkStateCard">
           <span>鏈路狀態</span>
-          <strong id="currentLinkState">無人機可控</strong>
+          <strong id="currentLinkState">C2鏈路正常</strong>
+          <p id="aiAutonomyStatus" class="ai-autonomy-status" hidden>啟動 AI 自主控制</p>
         </div>
       </section>
 
@@ -430,9 +431,16 @@
                   <span>dBm</span>
                 </div>
               </label>
+              <label for="interfererAntennaGainInput">
+                <span>干擾源天線 Gain</span>
+                <div class="number-field">
+                  <input id="interfererAntennaGainInput" type="number" step="0.1" value="0">
+                  <span>dBi</span>
+                </div>
+              </label>
             </div>
             <p class="jammer-range-note">
-              干擾計算距離：<output id="interfererUavDistanceOutput">--</output>
+              干擾計算距離：<output id="interfererUavDistanceOutput">--</output>；干擾功率僅使用干擾源自身的 Tx Power 與天線 Gain，不套用地面站或無人機天線 Gain。
             </p>
           </div>
 
@@ -447,6 +455,6 @@
     </details>
   </main>
 
-  <script defer src="script.js?v=20260709-data-rate-10kbps1"></script>
+  <script defer src="script.js?v=20260714-c2-link-status"></script>
 </body>
 </html>

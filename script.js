@@ -15,6 +15,7 @@ const gustInput = document.querySelector("#gustInput");
 const interfererEnabledInput = document.querySelector("#interfererEnabledInput");
 const interfererDistanceInput = document.querySelector("#interfererDistanceInput");
 const interfererPowerInput = document.querySelector("#interfererPowerInput");
+const interfererAntennaGainInput = document.querySelector("#interfererAntennaGainInput");
 const interfererUavDistanceOutput = document.querySelector("#interfererUavDistanceOutput");
 const frequencyInput = document.querySelector("#frequencyInput");
 const linkDirectionInputs = document.querySelectorAll('input[name="linkDirection"]');
@@ -38,6 +39,7 @@ const currentRequiredSignal = document.querySelector("#currentRequiredSignal");
 const currentLinkMargin = document.querySelector("#currentLinkMargin");
 const currentLinkState = document.querySelector("#currentLinkState");
 const linkStateCard = document.querySelector("#linkStateCard");
+const aiAutonomyStatus = document.querySelector("#aiAutonomyStatus");
 const debugLog = document.querySelector("#debugLog");
 const debugStatus = document.querySelector("#debugStatus");
 const chartSubtitle = document.querySelector("#chartSubtitle");
@@ -633,16 +635,16 @@ function milliwattsToDbm(milliwatts) {
 function calculateInterferenceRxDbm({
   distanceKm,
   frequencyMHz,
-  rxGainDbi,
   uavHeightMeters,
   interfererEnabled,
   interfererDistanceMeters,
-  interfererPowerDbm
+  interfererPowerDbm,
+  interfererAntennaGainDbi = 0
 }) {
   if (!interfererEnabled) return null;
   const uavToInterfererMeters = calculateInterfererUavDistanceMeters(distanceKm, uavHeightMeters, interfererDistanceMeters);
   const fsplIntDb = calculateFspl(Math.max(uavToInterfererMeters / 1000, 0.001), frequencyMHz);
-  return interfererPowerDbm + rxGainDbi - fsplIntDb;
+  return interfererPowerDbm + interfererAntennaGainDbi - fsplIntDb;
 }
 
 function calculateInterfererUavDistanceMeters(distanceKm, uavHeightMeters, interfererDistanceMeters) {
@@ -665,7 +667,8 @@ function calculateLinkBudget({
   multipathModel,
   interfererEnabled,
   interfererDistanceMeters,
-  interfererPowerDbm
+  interfererPowerDbm,
+  interfererAntennaGainDbi
 }) {
   const path = calculatePathLoss(distanceKm, frequencyMHz, gsHeightMeters, uavHeightMeters, multipathModel);
   const rxLevelDbm = txPowerDbm + txGainDbi + rxGainDbi - path.pathLossDb + polarizationLossDb;
@@ -673,11 +676,11 @@ function calculateLinkBudget({
   const interferenceRxDbm = calculateInterferenceRxDbm({
     distanceKm,
     frequencyMHz,
-    rxGainDbi,
     uavHeightMeters,
     interfererEnabled,
     interfererDistanceMeters,
-    interfererPowerDbm
+    interfererPowerDbm,
+    interfererAntennaGainDbi
   });
   const totalNoiseDbm = milliwattsToDbm(
     dbmToMilliwatts(noiseFloorDbm) + (interferenceRxDbm === null ? 0 : dbmToMilliwatts(interferenceRxDbm))
@@ -774,6 +777,7 @@ function exportCurrentStateCsv() {
     ["干擾源", "Enabled", snapshot.interfererEnabled ? "ON" : "OFF", ""],
     ["干擾源", "Interferer Distance", formatCsvNumber(snapshot.interfererDistanceMeters, 1), "m"],
     ["干擾源", "Interferer Tx Power", formatCsvNumber(snapshot.interfererPowerDbm, 2), "dBm"],
+    ["干擾源", "Interferer Antenna Gain", formatCsvNumber(snapshot.interfererAntennaGainDbi, 2), "dBi"],
     ["干擾源", "Interferer-UAV Distance", formatCsvNumber(snapshot.interfererUavDistanceMeters, 1), "m"]
   ];
   const csv = `\uFEFF${rows.map((row) => row.map(csvEscape).join(",")).join("\r\n")}`;
@@ -1618,6 +1622,7 @@ function updateDashboard(thetaFromScene, options = {}) {
   const interfererEnabled = Boolean(interfererEnabledInput?.checked);
   const interfererDistanceMeters = clampedNumberFromInput(interfererDistanceInput, 2000, 1, 100000);
   const interfererPowerDbm = numberFromInput(interfererPowerInput, 30);
+  const interfererAntennaGainDbi = numberFromInput(interfererAntennaGainInput, 0);
   const interfererUavDistanceMeters = calculateInterfererUavDistanceMeters(distanceKm, uavHeightMeters, interfererDistanceMeters);
   const frequencyMHz = positiveNumberFromInput(frequencyInput, 433);
   const linkDirection = getLinkDirection();
@@ -1680,7 +1685,8 @@ function updateDashboard(thetaFromScene, options = {}) {
     multipathModel,
     interfererEnabled,
     interfererDistanceMeters,
-    interfererPowerDbm
+    interfererPowerDbm,
+    interfererAntennaGainDbi
   });
   threeScene?.updateInterferer(interfererEnabled, interfererDistanceMeters, distanceKm);
   if (interfererUavDistanceOutput) {
@@ -1701,7 +1707,10 @@ function updateDashboard(thetaFromScene, options = {}) {
   currentLinkMargin.textContent = `${budget.linkMarginDb.toFixed(2)} dB`;
   currentLinkState.textContent = linkDirection === "downlink"
     ? (budget.isControllable ? "圖傳鏈路正常" : "圖傳鏈路中斷")
-    : (budget.isControllable ? "無人機可控" : "無人機失控");
+    : (budget.isControllable ? "C2鏈路正常" : "C2 鏈路中斷");
+  if (aiAutonomyStatus) {
+    aiAutonomyStatus.hidden = linkDirection !== "uplink" || budget.isControllable;
+  }
   linkStateCard.classList.toggle("controlled", budget.isControllable);
   linkStateCard.classList.toggle("lost", !budget.isControllable);
   updateMonitorView(linkDirection);
@@ -1738,6 +1747,7 @@ function updateDashboard(thetaFromScene, options = {}) {
     interfererEnabled,
     interfererDistanceMeters,
     interfererPowerDbm,
+    interfererAntennaGainDbi,
     interfererUavDistanceMeters,
     totalAttenuationDb: totalAttenuation,
     receivedSnrDb: budget.rxLevelDbm - budget.totalNoiseDbm,
@@ -1798,6 +1808,7 @@ function updateDashboard(thetaFromScene, options = {}) {
       interfererEnabled,
       interfererDistanceMeters,
       interfererPowerDbm,
+      interfererAntennaGainDbi,
       ...budget
     });
   }
@@ -1814,6 +1825,7 @@ function updateDashboard(thetaFromScene, options = {}) {
     interfererEnabled,
     interfererDistanceMeters,
     interfererPowerDbm,
+    interfererAntennaGainDbi,
     frequencyMHz,
     txPowerDbm,
     txGainDbi,
@@ -1899,6 +1911,7 @@ async function boot() {
       interfererEnabledInput,
       interfererDistanceInput,
       interfererPowerInput,
+      interfererAntennaGainInput,
       frequencyInput,
       gcsTxPowerInput,
       gcsAntennaGainInput,
